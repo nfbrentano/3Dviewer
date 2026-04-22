@@ -321,15 +321,19 @@
         }
 
         function loadFile(file) {
-            updateStatus("Carregando arquivo...", "#ffd166");
+            updateStatus("Lendo arquivo...", "#ffd166");
 
-            // Cria um blob URL temporário a partir do arquivo local para o PCDLoader
-            const url = URL.createObjectURL(file);
-            const loader = new PCDLoader();
-
-            loader.load(
-                url,
-                function (points) {
+            const reader = new FileReader();
+            
+            reader.onload = function (e) {
+                const data = e.target.result;
+                const loader = new PCDLoader();
+                
+                try {
+                    updateStatus("Processando nuvem de pontos...", "#ffd166");
+                    // PCDLoader.parse() suporta ArrayBuffer
+                    const points = loader.parse(data);
+                    
                     // Remove objeto anterior se existir
                     if (pointCloud) {
                         scene.remove(pointCloud);
@@ -372,22 +376,26 @@
                     updatePointCloudMaterial();
 
                     updateStatus("Arquivo carregado com sucesso", "#06d6a0");
-                    
-                    // Libera o URL da memória
-                    URL.revokeObjectURL(url);
-                },
-                function (xhr) {
-                    if (xhr.lengthComputable) {
-                        const percentComplete = xhr.loaded / xhr.total * 100;
-                        updateStatus(`Carregando... ${Math.round(percentComplete)}%`, "#ffd166");
-                    }
-                },
-                function (error) {
-                    console.error("Erro no carregamento do PCD:", error);
-                    updateStatus("Erro ao abrir arquivo. Arquivo inválido ou corrompido.", "#ff6b6b");
-                    URL.revokeObjectURL(url);
+                } catch (error) {
+                    console.error("Erro no processamento do PCD:", error);
+                    updateStatus("Erro ao processar arquivo. Verifique o console.", "#ff6b6b");
                 }
-            );
+            };
+            
+            reader.onprogress = function (e) {
+                if (e.lengthComputable) {
+                    const percentComplete = e.loaded / e.total * 100;
+                    updateStatus(`Lendo... ${Math.round(percentComplete)}%`, "#ffd166");
+                }
+            };
+
+            reader.onerror = function (error) {
+                console.error("Erro na leitura do arquivo local:", error);
+                updateStatus("Erro ao ler o arquivo local.", "#ff6b6b");
+            };
+            
+            // Ler o arquivo como ArrayBuffer (PCDLoader lidará com isso)
+            reader.readAsArrayBuffer(file);
         }
 
         function updatePointCloudMaterial() {
