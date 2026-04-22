@@ -320,82 +320,65 @@
             statusEl.style.color = color;
         }
 
-        function loadFile(file) {
-            updateStatus("Lendo arquivo...", "#ffd166");
+        async function loadFile(file) {
+            updateStatus("Lendo arquivo local...", "#ffd166");
 
-            const reader = new FileReader();
-            
-            reader.onload = function (e) {
-                const data = e.target.result;
+            try {
+                // Utiliza API moderna para ler o arquivo diretamente
+                const arrayBuffer = await file.arrayBuffer();
+                
+                updateStatus("Processando nuvem de pontos...", "#ffd166");
                 const loader = new PCDLoader();
                 
-                try {
-                    updateStatus("Processando nuvem de pontos...", "#ffd166");
-                    // PCDLoader.parse() suporta ArrayBuffer
-                    const points = loader.parse(data);
-                    
-                    // Remove objeto anterior se existir
-                    if (pointCloud) {
-                        scene.remove(pointCloud);
-                        pointCloud.geometry.dispose();
-                        pointCloud.material.dispose();
-                    }
-
-                    pointCloud = points;
-                    
-                    // Centralizar a nuvem de pontos
-                    pointCloud.geometry.computeBoundingBox();
-                    const boundingBox = pointCloud.geometry.boundingBox;
-                    const center = new THREE.Vector3();
-                    boundingBox.getCenter(center);
-                    // Aplica uma translação na geometria para que o (0,0,0) seja o centro do objeto
-                    pointCloud.geometry.translate(-center.x, -center.y, -center.z);
-
-                    // Ajustar câmera para enquadrar o objeto baseado no seu tamanho
-                    const size = new THREE.Vector3();
-                    boundingBox.getSize(size);
-                    const maxDim = Math.max(size.x, size.y, size.z);
-                    const fov = camera.fov * (Math.PI / 180);
-                    // Distância necessária na câmera (com margem)
-                    let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
-                    cameraZ *= 1.8; 
-                    
-                    camera.position.set(0, 0, cameraZ);
-                    controls.target.set(0, 0, 0); // Foca no centro
-                    controls.update();
-
-                    // Ajuste de granularidade do input de tamanho do ponto proporcional ao objeto
-                    const initialPointSize = maxDim * 0.005 || 0.05;
-                    pointSizeInput.max = maxDim * 0.1;
-                    pointSizeInput.min = maxDim * 0.0001;
-                    pointSizeInput.step = maxDim * 0.0001;
-                    pointSizeInput.value = initialPointSize;
-
-                    // Adiciona os pontos à cena e atualiza material
-                    scene.add(pointCloud);
-                    updatePointCloudMaterial();
-
-                    updateStatus("Arquivo carregado com sucesso", "#06d6a0");
-                } catch (error) {
-                    console.error("Erro no processamento do PCD:", error);
-                    updateStatus("Erro ao processar arquivo. Verifique o console.", "#ff6b6b");
+                // PCDLoader.parse() suporta ArrayBuffer
+                const points = loader.parse(arrayBuffer);
+                
+                // Remove objeto anterior se existir
+                if (pointCloud) {
+                    scene.remove(pointCloud);
+                    pointCloud.geometry.dispose();
+                    pointCloud.material.dispose();
                 }
-            };
-            
-            reader.onprogress = function (e) {
-                if (e.lengthComputable) {
-                    const percentComplete = e.loaded / e.total * 100;
-                    updateStatus(`Lendo... ${Math.round(percentComplete)}%`, "#ffd166");
-                }
-            };
 
-            reader.onerror = function (error) {
-                console.error("Erro na leitura do arquivo local:", error);
-                updateStatus("Erro ao ler o arquivo local.", "#ff6b6b");
-            };
-            
-            // Ler o arquivo como ArrayBuffer (PCDLoader lidará com isso)
-            reader.readAsArrayBuffer(file);
+                pointCloud = points;
+                
+                // Centralizar a nuvem de pontos
+                pointCloud.geometry.computeBoundingBox();
+                const boundingBox = pointCloud.geometry.boundingBox;
+                const center = new THREE.Vector3();
+                boundingBox.getCenter(center);
+                // Aplica uma translação na geometria para que o (0,0,0) seja o centro do objeto
+                pointCloud.geometry.translate(-center.x, -center.y, -center.z);
+
+                // Ajustar câmera para enquadrar o objeto baseado no seu tamanho
+                const size = new THREE.Vector3();
+                boundingBox.getSize(size);
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const fov = camera.fov * (Math.PI / 180);
+                // Distância necessária na câmera (com margem)
+                let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+                cameraZ *= 1.8; 
+                
+                camera.position.set(0, 0, cameraZ);
+                controls.target.set(0, 0, 0); // Foca no centro
+                controls.update();
+
+                // Ajuste de granularidade do input de tamanho do ponto proporcional ao objeto
+                const initialPointSize = maxDim * 0.005 || 0.05;
+                pointSizeInput.max = maxDim * 0.1;
+                pointSizeInput.min = maxDim * 0.0001;
+                pointSizeInput.step = maxDim * 0.0001;
+                pointSizeInput.value = initialPointSize;
+
+                // Adiciona os pontos à cena e atualiza material
+                scene.add(pointCloud);
+                updatePointCloudMaterial();
+
+                updateStatus("Arquivo carregado com sucesso", "#06d6a0");
+            } catch (error) {
+                console.error("Erro na leitura ou processamento do arquivo:", error);
+                updateStatus("Erro ao abrir o arquivo. Arquivo corrompido ou formato inválido.", "#ff6b6b");
+            }
         }
 
         function updatePointCloudMaterial() {
