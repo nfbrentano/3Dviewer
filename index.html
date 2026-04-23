@@ -178,16 +178,17 @@
 </head>
 <body>
     <!-- Drag and drop indicator -->
-    <div id="drag-overlay"><span>Solte o arquivo .pcd aqui</span></div>
+    <!-- Drag and drop indicator -->
+    <div id="drag-overlay"><span>Solte o arquivo (.pcd, .ply) aqui</span></div>
     
     <!-- User Interface -->
     <div id="ui-container">
-        <h1>Visualizador PCD</h1>
+        <h1>Visualizador 3D</h1>
         <div id="status">Aguardando arquivo...</div>
         
         <div class="control-group">
             <label for="file-input">Selecione ou arraste um arquivo local:</label>
-            <input type="file" id="file-input" accept=".pcd">
+            <input type="file" id="file-input" accept=".pcd,.ply,.nwd">
         </div>
 
         <div class="control-row">
@@ -217,6 +218,7 @@
     <script type="module">
         import * as THREE from 'three';
         import { PCDLoader } from 'three/addons/loaders/PCDLoader.js';
+        import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
         // Variáveis globais
@@ -288,11 +290,12 @@
                 dragOverlay.classList.remove('active');
                 if (e.dataTransfer.files.length > 0) {
                     const file = e.dataTransfer.files[0];
-                    if (file.name.toLowerCase().endsWith('.pcd')) {
+                    const ext = file.name.toLowerCase().split('.').pop();
+                    if (['pcd', 'ply', 'nwd'].includes(ext)) {
                         fileInput.files = e.dataTransfer.files; // Sincroniza o input file
                         loadFile(file);
                     } else {
-                        updateStatus("Erro: O arquivo não é um .pcd", "#ff6b6b");
+                        updateStatus("Erro: Formato não suportado. Use .pcd ou .ply", "#ff6b6b");
                     }
                 }
             });
@@ -321,63 +324,108 @@
         }
 
         async function loadFile(file) {
+            const fileName = file.name.toLowerCase();
+            
+            if (fileName.endsWith('.nwd')) {
+                updateStatus("Erro: Formato NWD não suportado diretamente.", "#ff6b6b");
+                alert("O formato .nwd é proprietário da Autodesk e não pode ser lido diretamente no navegador.\n\nPor favor, converta o arquivo para .glb, .gltf ou .ply antes de carregar.");
+                return;
+            }
+
             updateStatus("Lendo arquivo local...", "#ffd166");
 
             try {
-                // Utiliza API moderna para ler o arquivo diretamente
                 const arrayBuffer = await file.arrayBuffer();
+                let geometry;
+                let object;
                 
-                updateStatus("Processando nuvem de pontos...", "#ffd166");
-                const loader = new PCDLoader();
-                
-                // PCDLoader.parse() suporta ArrayBuffer
-                const points = loader.parse(arrayBuffer);
+                if (fileName.endsWith('.pcd')) {
+                    updateStatus("Processando PCD (Nuvem de Pontos)...", "#ffd166");
+                    const loader = new PCDLoader();
+                    object = loader.parse(arrayBuffer);
+                    geometry = object.geometry;
+                } else if (fileName.endsWith('.ply')) {
+                    updateStatus("Processando PLY...", "#ffd166");
+                    const loader = new PLYLoader();
+                    geometry = loader.parse(arrayBuffer);
+                    
+                    // Verifica se o PLY tem faces para decidir entre Mesh ou Points
+                    if (geometry.index !== null || (geometry.attributes.position && geometry.attributes.position.count > 0 && geometry.index === null && geometry.attributes.normal)) {
+                        // Se tem faces (index) ou parece ser uma malha, cria um Mesh
+                        // Nota: PLYLoader.parse retorna BufferGeometry. 
+                        // Se não houver faces, geometry.index será null.
+                        if (geometry.index !== null) {
+                            const material = new THREE.MeshStandardMaterial({ color: 0xcccccc, flatShading: true, side: THREE.DoubleSide });
+                            object = new THREE.Mesh(geometry, material);
+                            
+                            // Adicionar luz se for uma malha, caso contrário ficará preto
+                            if (!scene.getObjectByName('main-light')) {
+                                const light = new THREE.DirectionalLight(0xffffff, 3);
+                                light.position.set(1, 1, 1).normalize();
+                                light.name = 'main-light';
+                                scene.add(light);
+                                const ambientLight = new THREE.AmbientLight(0x404040);
+                                scene.add(ambientLight);
+                            }
+                        } else {
+                            // Se não tem faces, trata como nuvem de pontos
+                            const material = new THREE.PointsMaterial({ size: 0.05 });
+                            object = new THREE.Points(geometry, material);
+                        }
+                    } else {
+                        const material = new THREE.PointsMaterial({ size: 0.05 });
+                        object = new THREE.Points(geometry, material);
+                    }
+                }
                 
                 // Remove objeto anterior se existir
                 if (pointCloud) {
                     scene.remove(pointCloud);
-                    pointCloud.geometry.dispose();
-                    pointCloud.material.dispose();
+                    if (pointCloud.geometry) pointCloud.geometry.dispose();
+                    if (pointCloud.material) {
+                        if (Array.isArray(pointCloud.material)) {
+                            pointCloud.material.forEach(m => m.dispose());
+                        } else {
+                            pointCloud.material.dispose();
+                        }
+                    }
                 }
 
-                pointCloud = points;
+                pointCloud = object; // Usamos a variável pointCloud para o objeto atual (seja mesh ou points)
                 
-                // Centralizar a nuvem de pontos
+                // Centralizar
                 pointCloud.geometry.computeBoundingBox();
                 const boundingBox = pointCloud.geometry.boundingBox;
                 const center = new THREE.Vector3();
                 boundingBox.getCenter(center);
-                // Aplica uma translação na geometria para que o (0,0,0) seja o centro do objeto
                 pointCloud.geometry.translate(-center.x, -center.y, -center.z);
 
-                // Ajustar câmera para enquadrar o objeto baseado no seu tamanho
+                // Ajustar câmera
                 const size = new THREE.Vector3();
                 boundingBox.getSize(size);
                 const maxDim = Math.max(size.x, size.y, size.z);
                 const fov = camera.fov * (Math.PI / 180);
-                // Distância necessária na câmera (com margem)
                 let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
                 cameraZ *= 1.8; 
                 
                 camera.position.set(0, 0, cameraZ);
-                controls.target.set(0, 0, 0); // Foca no centro
+                controls.target.set(0, 0, 0);
                 controls.update();
 
-                // Ajuste de granularidade do input de tamanho do ponto proporcional ao objeto
+                // Ajuste de granularidade
                 const initialPointSize = maxDim * 0.005 || 0.05;
                 pointSizeInput.max = maxDim * 0.1;
                 pointSizeInput.min = maxDim * 0.0001;
                 pointSizeInput.step = maxDim * 0.0001;
                 pointSizeInput.value = initialPointSize;
 
-                // Adiciona os pontos à cena e atualiza material
                 scene.add(pointCloud);
                 updatePointCloudMaterial();
 
-                updateStatus("Arquivo carregado com sucesso", "#06d6a0");
+                updateStatus(`Arquivo ${fileName.split('.').pop().toUpperCase()} carregado`, "#06d6a0");
             } catch (error) {
-                console.error("Erro na leitura ou processamento do arquivo:", error);
-                updateStatus("Erro ao abrir o arquivo. Arquivo corrompido ou formato inválido.", "#ff6b6b");
+                console.error("Erro no processamento do arquivo:", error);
+                updateStatus("Erro ao abrir o arquivo.", "#ff6b6b");
             }
         }
 
