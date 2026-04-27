@@ -256,7 +256,7 @@
 <body>
     <!-- Drag and drop indicator -->
     <!-- Drag and drop indicator -->
-    <div id="drag-overlay"><span>Solte o arquivo (.pcd, .ply, .obj, .fbx, .glb) aqui</span></div>
+    <div id="drag-overlay"><span>Solte o arquivo (.pcd, .ply, .obj, .fbx, .glb, .c4d) aqui</span></div>
     
     <!-- User Interface -->
     <div id="ui-container">
@@ -276,7 +276,7 @@
         <div id="tab-viewer" class="tab-content active">
             <div class="control-group">
                 <label for="file-input">Selecione ou arraste um arquivo local:</label>
-                <input type="file" id="file-input" accept=".pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds,.max">
+                <input type="file" id="file-input" accept=".pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds,.max,.c4d">
             </div>
 
             <div class="control-row">
@@ -434,7 +434,7 @@
                 if (e.dataTransfer.files.length > 0) {
                     const file = e.dataTransfer.files[0];
                     const ext = file.name.toLowerCase().split('.').pop();
-                    if (['pcd', 'ply', 'obj', 'fbx', 'glb', 'gltf', '3ds', 'max'].includes(ext)) {
+                    if (['pcd', 'ply', 'obj', 'fbx', 'glb', 'gltf', '3ds', 'max', 'c4d'].includes(ext)) {
                         fileInput.files = e.dataTransfer.files; // Sincroniza o input file
                         loadFile(file);
                     } else {
@@ -605,9 +605,10 @@
                 let geometry;
                 let object;
                 
-                if (fileName.endsWith('.max')) {
-                    updateStatus("Erro: .MAX não suportado", "#ff6b6b");
-                    alert("O formato .max é proprietário do 3ds Max e não pode ser lido diretamente no navegador.\n\nPor favor, exporte seu modelo no 3ds Max para .FBX ou .GLB e tente novamente.");
+                if (fileName.endsWith('.max') || fileName.endsWith('.c4d')) {
+                    const format = fileName.endsWith('.max') ? '3ds Max (.MAX)' : 'Cinema 4D (.C4D)';
+                    updateStatus(`Erro: ${format} não suportado`, "#ff6b6b");
+                    alert(`O formato ${format} é proprietário e não pode ser lido diretamente no navegador.\n\nPor favor, exporte seu modelo para .FBX ou .GLB e tente novamente.`);
                     return;
                 }
 
