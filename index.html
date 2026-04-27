@@ -248,7 +248,9 @@
         {
             "imports": {
                 "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "@loaders.gl/core": "https://esm.sh/@loaders.gl/core@4.1.0",
+                "@loaders.gl/las": "https://esm.sh/@loaders.gl/las@4.1.0"
             }
         }
     </script>
@@ -256,7 +258,7 @@
 <body>
     <!-- Drag and drop indicator -->
     <!-- Drag and drop indicator -->
-    <div id="drag-overlay"><span>Solte o arquivo (.pcd, .ply, .obj, .fbx, .glb, .c4d) aqui</span></div>
+    <div id="drag-overlay"><span>Solte o arquivo (.las, .pcd, .ply, .obj, .fbx, .glb, .c4d) aqui</span></div>
     
     <!-- User Interface -->
     <div id="ui-container">
@@ -276,7 +278,7 @@
         <div id="tab-viewer" class="tab-content active">
             <div class="control-group">
                 <label for="file-input">Selecione ou arraste um arquivo local:</label>
-                <input type="file" id="file-input" accept=".pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds,.max,.c4d">
+                <input type="file" id="file-input" accept=".las,.pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds,.max,.c4d">
             </div>
 
             <div class="control-row">
@@ -306,7 +308,7 @@
             
             <div class="control-group">
                 <label for="opt-file-input">Arquivo para Otimizar (.pcd, .ply):</label>
-                <input type="file" id="opt-file-input" accept=".pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds">
+                <input type="file" id="opt-file-input" accept=".las,.pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds">
             </div>
 
             <div class="control-row">
@@ -346,6 +348,8 @@
         import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
         import { TDSLoader } from 'three/addons/loaders/TDSLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { load } from '@loaders.gl/core';
+        import { LASLoader } from '@loaders.gl/las';
 
         // Variáveis globais
         let scene, camera, renderer, controls;
@@ -434,11 +438,11 @@
                 if (e.dataTransfer.files.length > 0) {
                     const file = e.dataTransfer.files[0];
                     const ext = file.name.toLowerCase().split('.').pop();
-                    if (['pcd', 'ply', 'obj', 'fbx', 'glb', 'gltf', '3ds', 'max', 'c4d'].includes(ext)) {
+                    if (['las', 'pcd', 'ply', 'obj', 'fbx', 'glb', 'gltf', '3ds', 'max', 'c4d'].includes(ext)) {
                         fileInput.files = e.dataTransfer.files; // Sincroniza o input file
                         loadFile(file);
                     } else {
-                        updateStatus("Erro: Formato não suportado. Use .pcd ou .ply", "#ff6b6b");
+                        updateStatus("Erro: Formato não suportado. Use .las, .pcd ou .ply", "#ff6b6b");
                     }
                 }
             });
@@ -612,7 +616,37 @@
                     return;
                 }
 
-                if (fileName.endsWith('.pcd')) {
+                if (fileName.endsWith('.las')) {
+                    updateStatus("Processando LAS (Nuvem de Pontos)...", "#ffd166");
+                    const data = await load(file, LASLoader);
+                    
+                    geometry = new THREE.BufferGeometry();
+                    
+                    if (data.attributes.POSITION) {
+                        geometry.setAttribute('position', new THREE.BufferAttribute(data.attributes.POSITION.value, 3));
+                    }
+                    
+                    if (data.attributes.COLOR_0) {
+                        // LAS colors are often 16-bit, loaders.gl might return them as is or normalized
+                        // We use the normalized flag if they are large integers
+                        const colorAttr = data.attributes.COLOR_0;
+                        geometry.setAttribute('color', new THREE.BufferAttribute(colorAttr.value, colorAttr.size, colorAttr.value instanceof Uint16Array));
+                    } else if (data.attributes.intensity) {
+                        // If no color, maybe use intensity as grayscale
+                        const intensity = data.attributes.intensity.value;
+                        const colors = new Float32Array(intensity.length * 3);
+                        for (let i = 0; i < intensity.length; i++) {
+                            const val = intensity[i] / 255; // Simple normalization
+                            colors[i * 3] = val;
+                            colors[i * 3 + 1] = val;
+                            colors[i * 3 + 2] = val;
+                        }
+                        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                    }
+                    
+                    const material = new THREE.PointsMaterial({ size: 0.05, vertexColors: !!(data.attributes.COLOR_0 || data.attributes.intensity) });
+                    object = new THREE.Points(geometry, material);
+                } else if (fileName.endsWith('.pcd')) {
                     updateStatus("Processando PCD (Nuvem de Pontos)...", "#ffd166");
                     const loader = new PCDLoader();
                     object = loader.parse(arrayBuffer);
