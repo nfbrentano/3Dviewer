@@ -256,7 +256,7 @@
 <body>
     <!-- Drag and drop indicator -->
     <!-- Drag and drop indicator -->
-    <div id="drag-overlay"><span>Solte o arquivo (.pcd, .ply, .obj) aqui</span></div>
+    <div id="drag-overlay"><span>Solte o arquivo (.pcd, .ply, .obj, .fbx, .glb) aqui</span></div>
     
     <!-- User Interface -->
     <div id="ui-container">
@@ -276,7 +276,7 @@
         <div id="tab-viewer" class="tab-content active">
             <div class="control-group">
                 <label for="file-input">Selecione ou arraste um arquivo local:</label>
-                <input type="file" id="file-input" accept=".pcd,.ply,.obj">
+                <input type="file" id="file-input" accept=".pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds,.max">
             </div>
 
             <div class="control-row">
@@ -306,7 +306,7 @@
             
             <div class="control-group">
                 <label for="opt-file-input">Arquivo para Otimizar (.pcd, .ply):</label>
-                <input type="file" id="opt-file-input" accept=".pcd,.ply,.obj">
+                <input type="file" id="opt-file-input" accept=".pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds">
             </div>
 
             <div class="control-row">
@@ -342,6 +342,9 @@
         import { PCDLoader } from 'three/addons/loaders/PCDLoader.js';
         import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
         import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+        import { TDSLoader } from 'three/addons/loaders/TDSLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
         // Variáveis globais
@@ -431,7 +434,7 @@
                 if (e.dataTransfer.files.length > 0) {
                     const file = e.dataTransfer.files[0];
                     const ext = file.name.toLowerCase().split('.').pop();
-                    if (['pcd', 'ply', 'obj'].includes(ext)) {
+                    if (['pcd', 'ply', 'obj', 'fbx', 'glb', 'gltf', '3ds', 'max'].includes(ext)) {
                         fileInput.files = e.dataTransfer.files; // Sincroniza o input file
                         loadFile(file);
                     } else {
@@ -602,6 +605,12 @@
                 let geometry;
                 let object;
                 
+                if (fileName.endsWith('.max')) {
+                    updateStatus("Erro: .MAX não suportado", "#ff6b6b");
+                    alert("O formato .max é proprietário do 3ds Max e não pode ser lido diretamente no navegador.\n\nPor favor, exporte seu modelo no 3ds Max para .FBX ou .GLB e tente novamente.");
+                    return;
+                }
+
                 if (fileName.endsWith('.pcd')) {
                     updateStatus("Processando PCD (Nuvem de Pontos)...", "#ffd166");
                     const loader = new PCDLoader();
@@ -655,6 +664,35 @@
                         const ambientLight = new THREE.AmbientLight(0x404040);
                         scene.add(ambientLight);
                     }
+                } else if (fileName.endsWith('.fbx')) {
+                    updateStatus("Processando FBX...", "#ffd166");
+                    const loader = new FBXLoader();
+                    object = loader.parse(arrayBuffer);
+                } else if (fileName.endsWith('.glb') || fileName.endsWith('.gltf')) {
+                    updateStatus("Processando GLTF...", "#ffd166");
+                    const loader = new GLTFLoader();
+                    const gltf = await new Promise((resolve, reject) => {
+                        loader.parse(arrayBuffer, '', resolve, reject);
+                    });
+                    object = gltf.scene;
+                } else if (fileName.endsWith('.3ds')) {
+                    updateStatus("Processando 3DS...", "#ffd166");
+                    const loader = new TDSLoader();
+                    object = loader.parse(arrayBuffer);
+                }
+                
+                if (!object) {
+                    throw new Error("Não foi possível processar o objeto.");
+                }
+
+                // Garantir iluminação para qualquer Mesh carregado
+                if (!scene.getObjectByName('main-light')) {
+                    const light = new THREE.DirectionalLight(0xffffff, 3);
+                    light.position.set(1, 1, 1).normalize();
+                    light.name = 'main-light';
+                    scene.add(light);
+                    const ambientLight = new THREE.AmbientLight(0x404040);
+                    scene.add(ambientLight);
                 }
                 
                 // Remove objeto anterior se existir
