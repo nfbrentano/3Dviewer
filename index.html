@@ -633,11 +633,36 @@
                 if (fileName.endsWith('.las') || fileName.endsWith('.laz')) {
                     updateStatus(`Processando ${fileName.endsWith('.laz') ? 'LAZ' : 'LAS'}...`, "#ffd166");
                     
-                    // loaders.gl handles both .las and .laz if dependencies are provided
-                    const data = await load(file, LASLoader, {
-                        las: { skipHeader: false },
-                        worker: true
-                    });
+                    // Parse LAS/LAZ — worker disabled for esm.sh CORS stability
+                    let data;
+                    const t0 = performance.now();
+                    try {
+                        data = await load(file, LASLoader, {
+                            las: { skipHeader: false },
+                            worker: false
+                        });
+                    } catch (workerErr) {
+                        console.warn('LAS parse falhou, tentando modo síncrono...', workerErr);
+                        data = await load(file, LASLoader, {
+                            las: { skipHeader: false },
+                            worker: false
+                        });
+                    }
+                    const tParse = (performance.now() - t0).toFixed(0);
+
+                    // Validação de dados
+                    if (!data.attributes?.POSITION?.value?.length) {
+                        throw new Error('Arquivo LAS/LAZ sem dados de posição válidos.');
+                    }
+
+                    // Diagnóstico no console
+                    console.group('📊 LAS/LAZ Diagnóstico');
+                    console.log(`Arquivo: ${file.name} (${(file.size / 1048576).toFixed(1)} MB)`);
+                    console.log(`Pontos: ${(data.attributes.POSITION.value.length / 3).toLocaleString()}`);
+                    console.log(`Atributos: [${Object.keys(data.attributes).join(', ')}]`);
+                    console.log(`Tempo de parse: ${tParse} ms`);
+                    if (data.header) console.log('Header:', data.header);
+                    console.groupEnd();
                     
                     geometry = new THREE.BufferGeometry();
                     

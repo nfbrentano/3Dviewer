@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnóstico LAS/LAZ — Validação de Leitura</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        header {
+            background: linear-gradient(135deg, rgba(79,70,229,0.15), rgba(168,85,247,0.1));
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 24px 32px;
+        }
+
+        header h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        header p { font-size: 0.85rem; color: #888; margin-top: 4px; }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        /* Upload Zone */
+        .upload-zone {
+            border: 2px dashed rgba(129,140,248,0.3);
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s;
+            background: rgba(129,140,248,0.03);
+            margin-bottom: 24px;
+        }
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: #818cf8;
+            background: rgba(129,140,248,0.08);
+        }
+        .upload-zone input { display: none; }
+        .upload-zone .icon { font-size: 2.5rem; margin-bottom: 8px; }
+        .upload-zone .label { font-size: 0.95rem; color: #aaa; }
+
+        /* Check Items */
+        .check-section {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 10px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+
+        .check-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 18px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            background: rgba(255,255,255,0.01);
+        }
+
+        .check-header .badge {
+            margin-left: auto;
+            font-size: 0.75rem;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+        .badge.pending { background: #333; color: #888; }
+        .badge.ok { background: rgba(6,214,160,0.15); color: #06d6a0; }
+        .badge.warn { background: rgba(255,209,102,0.15); color: #ffd166; }
+        .badge.fail { background: rgba(255,107,107,0.15); color: #ff6b6b; }
+
+        .check-body {
+            padding: 14px 18px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.78rem;
+            line-height: 1.7;
+            color: #aaa;
+            white-space: pre-wrap;
+        }
+
+        /* 3D Preview */
+        #preview-container {
+            width: 100%;
+            height: 350px;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #111;
+            border: 1px solid rgba(255,255,255,0.06);
+            margin-top: 12px;
+        }
+
+        /* Copy Button */
+        .btn-copy {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #4f46e5;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            margin-top: 16px;
+            transition: background 0.2s;
+        }
+        .btn-copy:hover { background: #6366f1; }
+        .btn-copy:disabled { background: #333; cursor: not-allowed; }
+
+        .hidden { display: none; }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "@loaders.gl/core": "https://esm.sh/@loaders.gl/core@4.1.0",
+                "@loaders.gl/las": "https://esm.sh/@loaders.gl/las@4.1.0"
+            }
+        }
+    </script>
+</head>
+<body>
+    <header>
+        <h1>📊 Diagnóstico LAS / LAZ</h1>
+        <p>Valide a leitura de arquivos de nuvem de pontos passo a passo</p>
+    </header>
+
+    <div class="container">
+        <!-- Upload -->
+        <div class="upload-zone" id="upload-zone">
+            <input type="file" id="file-input" accept=".las,.laz">
+            <div class="icon">📂</div>
+            <div class="label">Clique ou arraste um arquivo <strong>.las</strong> ou <strong>.laz</strong></div>
+        </div>
+
+        <!-- Results (hidden until file loaded) -->
+        <div id="results" class="hidden">
+            <!-- 1. File Info -->
+            <div class="check-section" id="sec-file">
+                <div class="check-header">
+                    <span>1. Informações do Arquivo</span>
+                    <span class="badge pending" id="badge-file">⏳ Aguardando</span>
+                </div>
+                <div class="check-body" id="body-file">—</div>
+            </div>
+
+            <!-- 2. Loader Parse -->
+            <div class="check-section" id="sec-parse">
+                <div class="check-header">
+                    <span>2. Parse (loaders.gl)</span>
+                    <span class="badge pending" id="badge-parse">⏳ Aguardando</span>
+                </div>
+                <div class="check-body" id="body-parse">—</div>
+            </div>
+
+            <!-- 3. Positions -->
+            <div class="check-section" id="sec-pos">
+                <div class="check-header">
+                    <span>3. Posições (XYZ)</span>
+                    <span class="badge pending" id="badge-pos">⏳ Aguardando</span>
+                </div>
+                <div class="check-body" id="body-pos">—</div>
+            </div>
+
+            <!-- 4. Colors -->
+            <div class="check-section" id="sec-color">
+                <div class="check-header">
+                    <span>4. Cores (RGB)</span>
+                    <span class="badge pending" id="badge-color">⏳ Aguardando</span>
+                </div>
+                <div class="check-body" id="body-color">—</div>
+            </div>
+
+            <!-- 5. Intensity -->
+            <div class="check-section" id="sec-intensity">
+                <div class="check-header">
+                    <span>5. Intensidade (fallback)</span>
+                    <span class="badge pending" id="badge-intensity">⏳ Aguardando</span>
+                </div>
+                <div class="check-body" id="body-intensity">—</div>
+            </div>
+
+            <!-- 6. Performance -->
+            <div class="check-section" id="sec-perf">
+                <div class="check-header">
+                    <span>6. Performance</span>
+                    <span class="badge pending" id="badge-perf">⏳ Aguardando</span>
+                </div>
+                <div class="check-body" id="body-perf">—</div>
+            </div>
+
+            <!-- 7. 3D Render -->
+            <div class="check-section" id="sec-render">
+                <div class="check-header">
+                    <span>7. Renderização 3D</span>
+                    <span class="badge pending" id="badge-render">⏳ Aguardando</span>
+                </div>
+                <div id="preview-container"></div>
+            </div>
+
+            <button class="btn-copy" id="btn-copy" disabled>📋 Copiar Relatório</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { load } from '@loaders.gl/core';
+        import { LASLoader } from '@loaders.gl/las';
+
+        // --- DOM refs ---
+        const uploadZone = document.getElementById('upload-zone');
+        const fileInput = document.getElementById('file-input');
+        const resultsDiv = document.getElementById('results');
+        const btnCopy = document.getElementById('btn-copy');
+
+        // Report accumulator
+        let reportLines = [];
+
+        // --- Upload handling ---
+        uploadZone.addEventListener('click', () => fileInput.click());
+        uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+        uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) handleFile(e.target.files[0]);
+        });
+
+        // --- Helpers ---
+        function setBadge(id, status) {
+            const el = document.getElementById(`badge-${id}`);
+            el.className = `badge ${status}`;
+            const labels = { ok: '✅ OK', warn: '⚠️ Atenção', fail: '❌ Falha', pending: '⏳ Aguardando' };
+            el.textContent = labels[status] || status;
+        }
+
+        function setBody(id, text) {
+            document.getElementById(`body-${id}`).textContent = text;
+        }
+
+        function addReport(section, lines) {
+            reportLines.push(`\n=== ${section} ===`);
+            reportLines.push(...lines);
+        }
+
+        function fmt(n) {
+            return typeof n === 'number' ? n.toLocaleString('pt-BR') : String(n);
+        }
+
+        function analyzeArray(arr) {
+            let min = Infinity, max = -Infinity, nanCount = 0, infCount = 0;
+            for (let i = 0; i < arr.length; i++) {
+                const v = arr[i];
+                if (isNaN(v)) { nanCount++; continue; }
+                if (!isFinite(v)) { infCount++; continue; }
+                if (v < min) min = v;
+                if (v > max) max = v;
+            }
+            return { min, max, nanCount, infCount };
+        }
+
+        // --- Main pipeline ---
+        async function handleFile(file) {
+            reportLines = [`Relatório de Diagnóstico LAS/LAZ`, `Data: ${new Date().toLocaleString('pt-BR')}`, `---`];
+            resultsDiv.classList.remove('hidden');
+            btnCopy.disabled = true;
+
+            // Reset all badges
+            ['file', 'parse', 'pos', 'color', 'intensity', 'perf', 'render'].forEach(id => {
+                setBadge(id, 'pending');
+                const body = document.getElementById(`body-${id}`);
+                if (body) body.textContent = '—';
+            });
+
+            // 1. File Info
+            const ext = file.name.split('.').pop().toLowerCase();
+            const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+            const isValid = ['las', 'laz'].includes(ext);
+
+            const fileLines = [
+                `Nome:      ${file.name}`,
+                `Tamanho:   ${sizeMB} MB (${fmt(file.size)} bytes)`,
+                `Extensão:  .${ext}`,
+                `Válido:    ${isValid ? 'Sim' : 'NÃO — formato não suportado'}`
+            ];
+            setBody('file', fileLines.join('\n'));
+            setBadge('file', isValid ? 'ok' : 'fail');
+            addReport('1. Informações do Arquivo', fileLines);
+
+            if (!isValid) return;
+
+            // 2. Parse
+            let data;
+            const t0 = performance.now();
+            try {
+                data = await load(file, LASLoader, {
+                    las: { skipHeader: false },
+                    worker: false
+                });
+                const tParse = (performance.now() - t0).toFixed(0);
+
+                const attrs = Object.keys(data.attributes || {});
+                const header = data.header || data.loaderData?.header || {};
+                const parseLines = [
+                    `Tempo de parse:  ${tParse} ms`,
+                    `Atributos:       [${attrs.join(', ')}]`,
+                    `Header keys:     [${Object.keys(header).join(', ')}]`
+                ];
+
+                if (header.majorVersion !== undefined) {
+                    parseLines.push(`Versão LAS:      ${header.majorVersion}.${header.minorVersion}`);
+                }
+                if (header.pointsCount !== undefined) {
+                    parseLines.push(`Num Pontos:      ${fmt(header.pointsCount)}`);
+                }
+
+                setBody('parse', parseLines.join('\n'));
+                setBadge('parse', 'ok');
+                addReport('2. Parse (loaders.gl)', parseLines);
+            } catch (err) {
+                const errLines = [`ERRO: ${err.message}`, `Stack: ${err.stack?.split('\n').slice(0, 3).join('\n')}`];
+                setBody('parse', errLines.join('\n'));
+                setBadge('parse', 'fail');
+                addReport('2. Parse (loaders.gl)', errLines);
+                return;
+            }
+
+            // 3. Positions
+            const posAttr = data.attributes?.POSITION;
+            if (posAttr && posAttr.value && posAttr.value.length > 0) {
+                const pos = posAttr.value;
+                const count = pos.length / 3;
+                const xStats = analyzeArray(pos.filter((_, i) => i % 3 === 0));
+                const yStats = analyzeArray(pos.filter((_, i) => i % 3 === 1));
+                const zStats = analyzeArray(pos.filter((_, i) => i % 3 === 2));
+                const totalNaN = xStats.nanCount + yStats.nanCount + zStats.nanCount;
+                const totalInf = xStats.infCount + yStats.infCount + zStats.infCount;
+
+                const needsShift = Math.abs(xStats.max) > 10000 || Math.abs(yStats.max) > 10000;
+
+                const posLines = [
+                    `Atributo:        ✅ POSITION encontrado`,
+                    `Pontos lidos:    ${fmt(count)}`,
+                    `Tipo Array:      ${pos.constructor.name}`,
+                    `Range X:         [${xStats.min.toFixed(2)} — ${xStats.max.toFixed(2)}]`,
+                    `Range Y:         [${yStats.min.toFixed(2)} — ${yStats.max.toFixed(2)}]`,
+                    `Range Z:         [${zStats.min.toFixed(2)} — ${zStats.max.toFixed(2)}]`,
+                    `Contém NaN:      ${totalNaN > 0 ? `⚠️ ${totalNaN} valores` : '❌ Não'}`,
+                    `Contém Infinity: ${totalInf > 0 ? `⚠️ ${totalInf} valores` : '❌ Não'}`,
+                    `Coord. GIS:      ${needsShift ? '⚠️ Sim — local shift NECESSÁRIO' : '✅ Não — coordenadas locais'}`
+                ];
+                setBody('pos', posLines.join('\n'));
+                setBadge('pos', totalNaN > 0 || totalInf > 0 ? 'warn' : 'ok');
+                addReport('3. Posições (XYZ)', posLines);
+            } else {
+                setBody('pos', 'ERRO: Atributo POSITION não encontrado ou vazio.');
+                setBadge('pos', 'fail');
+                addReport('3. Posições (XYZ)', ['ERRO: Sem dados de posição']);
+                return;
+            }
+
+            // 4. Colors
+            const colorAttr = data.attributes?.COLOR_0;
+            if (colorAttr && colorAttr.value && colorAttr.value.length > 0) {
+                const c = colorAttr.value;
+                const cStats = analyzeArray(c);
+                const is16bit = cStats.max > 255;
+                const sample = Array.from(c.slice(0, colorAttr.size || 3)).map(v => v.toFixed(2));
+
+                const colorLines = [
+                    `COLOR_0:         ✅ Presente`,
+                    `Tipo Array:      ${c.constructor.name}`,
+                    `Componentes:     ${colorAttr.size || 'desconhecido'}`,
+                    `Range:           [${cStats.min} — ${cStats.max}]`,
+                    `Profundidade:    ${is16bit ? '16-bit (0–65535)' : '8-bit (0–255)'}`,
+                    `Normalização:    ${is16bit ? 'Necessária (÷65535)' : 'Direta (÷255)'}`,
+                    `Amostra [0]:     [${sample.join(', ')}]`
+                ];
+                setBody('color', colorLines.join('\n'));
+                setBadge('color', 'ok');
+                addReport('4. Cores (RGB)', colorLines);
+            } else {
+                setBody('color', 'COLOR_0 não presente — sem cores RGB no arquivo.');
+                setBadge('color', 'warn');
+                addReport('4. Cores (RGB)', ['Sem atributo COLOR_0']);
+            }
+
+            // 5. Intensity
+            const intAttr = data.attributes?.intensity;
+            if (intAttr && intAttr.value && intAttr.value.length > 0) {
+                const ival = intAttr.value;
+                const iStats = analyzeArray(ival);
+                const intLines = [
+                    `Intensidade:     ✅ Presente`,
+                    `Tipo Array:      ${ival.constructor.name}`,
+                    `Range:           [${iStats.min} — ${iStats.max}]`,
+                    `Resolução:       ${iStats.max > 255 ? '16-bit' : '8-bit'}`,
+                    `Colormap:        Será aplicado Blue→Cyan→Green→Yellow→Red`
+                ];
+                setBody('intensity', intLines.join('\n'));
+                setBadge('intensity', 'ok');
+                addReport('5. Intensidade', intLines);
+            } else {
+                const msg = colorAttr ? '⏭️ Não necessário — RGB presente.' : '❌ Sem intensidade nem RGB — pontos sem cor.';
+                setBody('intensity', msg);
+                setBadge('intensity', colorAttr ? 'ok' : 'warn');
+                addReport('5. Intensidade', [msg]);
+            }
+
+            // 6. Performance
+            const tTotal = (performance.now() - t0).toFixed(0);
+            const memEst = ((posAttr.value.length * 4) / (1024 * 1024)).toFixed(1);
+            const perfLines = [
+                `Tempo total:     ${tTotal} ms`,
+                `Memória (pos):   ~${memEst} MB (Float32 positions)`,
+                `Worker:          Desabilitado (modo síncrono)`
+            ];
+            setBody('perf', perfLines.join('\n'));
+            setBadge('perf', parseInt(tTotal) < 30000 ? 'ok' : 'warn');
+            addReport('6. Performance', perfLines);
+
+            // 7. 3D Render
+            try {
+                render3D(data);
+                setBadge('render', 'ok');
+                addReport('7. Renderização', ['✅ Preview 3D renderizado com sucesso']);
+            } catch (err) {
+                setBadge('render', 'fail');
+                addReport('7. Renderização', [`ERRO: ${err.message}`]);
+            }
+
+            // Enable copy
+            btnCopy.disabled = false;
+        }
+
+        // --- 3D Mini Preview ---
+        function render3D(data) {
+            const container = document.getElementById('preview-container');
+            container.innerHTML = '';
+
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111118);
+
+            const w = container.clientWidth;
+            const h = container.clientHeight;
+            const camera = new THREE.PerspectiveCamera(60, w / h, 0.01, 10000);
+
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(w, h);
+            container.appendChild(renderer.domElement);
+
+            const controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            // Build geometry
+            const geometry = new THREE.BufferGeometry();
+            const pos = data.attributes.POSITION.value;
+
+            // Local shift
+            let minX = Infinity, minY = Infinity, minZ = Infinity;
+            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+            for (let i = 0; i < pos.length; i += 3) {
+                if (pos[i] < minX) minX = pos[i];
+                if (pos[i+1] < minY) minY = pos[i+1];
+                if (pos[i+2] < minZ) minZ = pos[i+2];
+                if (pos[i] > maxX) maxX = pos[i];
+                if (pos[i+1] > maxY) maxY = pos[i+1];
+                if (pos[i+2] > maxZ) maxZ = pos[i+2];
+            }
+            const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+            const shifted = new Float32Array(pos.length);
+            for (let i = 0; i < pos.length; i += 3) {
+                shifted[i] = pos[i] - cx;
+                shifted[i+1] = pos[i+1] - cy;
+                shifted[i+2] = pos[i+2] - cz;
+            }
+            geometry.setAttribute('position', new THREE.BufferAttribute(shifted, 3));
+
+            // Colors
+            let hasColor = false;
+            if (data.attributes.COLOR_0) {
+                geometry.setAttribute('color', new THREE.BufferAttribute(data.attributes.COLOR_0.value, data.attributes.COLOR_0.size, true));
+                hasColor = true;
+            } else if (data.attributes.intensity) {
+                const intensity = data.attributes.intensity.value;
+                const colors = new Float32Array(intensity.length * 3);
+                for (let i = 0; i < intensity.length; i++) {
+                    let val = intensity[i];
+                    if (val > 255) val /= 65535; else val /= 255;
+                    colors[i*3] = Math.min(Math.max(0, 4*val - 2), 1);
+                    colors[i*3+1] = val < 0.5 ? 2*val : 2 - 2*val;
+                    colors[i*3+2] = Math.min(Math.max(0, 2 - 4*val), 1);
+                }
+                geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                hasColor = true;
+            }
+
+            const material = new THREE.PointsMaterial({
+                size: Math.max(maxX - minX, maxY - minY, maxZ - minZ) * 0.003,
+                vertexColors: hasColor,
+                sRGBEncoding: true
+            });
+            const points = new THREE.Points(geometry, material);
+            scene.add(points);
+
+            // Camera fit
+            const maxDim = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
+            const fov = camera.fov * (Math.PI / 180);
+            const dist = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5;
+            camera.position.set(dist * 0.5, dist * 0.5, dist);
+            controls.update();
+
+            // Grid
+            const grid = new THREE.GridHelper(maxDim, 20, 0x333333, 0x1a1a1a);
+            scene.add(grid);
+
+            function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            }
+            animate();
+        }
+
+        // --- Copy Report ---
+        btnCopy.addEventListener('click', () => {
+            navigator.clipboard.writeText(reportLines.join('\n')).then(() => {
+                btnCopy.textContent = '✅ Copiado!';
+                setTimeout(() => { btnCopy.textContent = '📋 Copiar Relatório'; }, 2000);
+            });
+        });
+    </script>
+</body>
+</html>
