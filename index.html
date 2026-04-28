@@ -250,7 +250,8 @@
                 "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
                 "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
                 "@loaders.gl/core": "https://esm.sh/@loaders.gl/core@4.1.0",
-                "@loaders.gl/las": "https://esm.sh/@loaders.gl/las@4.1.0"
+                "@loaders.gl/las": "https://esm.sh/@loaders.gl/las@4.1.0",
+                "@loaders.gl/draco": "https://esm.sh/@loaders.gl/draco@4.1.0"
             }
         }
     </script>
@@ -258,7 +259,7 @@
 <body>
     <!-- Drag and drop indicator -->
     <!-- Drag and drop indicator -->
-    <div id="drag-overlay"><span>Solte o arquivo (.las, .pcd, .ply, .obj, .fbx, .glb, .c4d) aqui</span></div>
+    <div id="drag-overlay"><span>Solte o arquivo (.las, .laz, .pcd, .ply, .obj, .fbx, .glb, .c4d) aqui</span></div>
     
     <!-- User Interface -->
     <div id="ui-container">
@@ -278,7 +279,7 @@
         <div id="tab-viewer" class="tab-content active">
             <div class="control-group">
                 <label for="file-input">Selecione ou arraste um arquivo local:</label>
-                <input type="file" id="file-input" accept=".las,.pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds,.max,.c4d">
+                <input type="file" id="file-input" accept=".las,.laz,.pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds,.max,.c4d">
             </div>
 
             <div class="control-row">
@@ -307,8 +308,8 @@
             <p style="font-size: 0.8rem; color: #aaa; margin: 0;">Reduza arquivos gigantes (como 10GB+) para versões leves mantendo apenas uma porcentagem dos pontos.</p>
             
             <div class="control-group">
-                <label for="opt-file-input">Arquivo para Otimizar (.pcd, .ply):</label>
-                <input type="file" id="opt-file-input" accept=".las,.pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds">
+                <label for="opt-file-input">Arquivo para Otimizar (.las, .laz, .pcd, .ply):</label>
+                <input type="file" id="opt-file-input" accept=".las,.laz,.pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds">
             </div>
 
             <div class="control-row">
@@ -468,6 +469,15 @@
             startOptBtn.addEventListener('click', startOptimization);
         }
 
+        function downloadBlob(blob, fileName) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
         async function startOptimization() {
             const file = optFileInput.files[0];
             if (!file) {
@@ -477,11 +487,12 @@
 
             const ratio = parseFloat(optRatioSelect.value);
             const fileName = file.name;
+            const isLAS = fileName.toLowerCase().endsWith('.las') || fileName.toLowerCase().endsWith('.laz');
             const isPCD = fileName.toLowerCase().endsWith('.pcd');
             const isPLY = fileName.toLowerCase().endsWith('.ply');
 
-            if (!isPCD && !isPLY) {
-                alert("O otimizador suporta apenas .pcd e .ply");
+            if (!isPCD && !isPLY && !isLAS) {
+                alert("O otimizador suporta apenas .las, .laz, .pcd e .ply");
                 return;
             }
 
@@ -490,84 +501,87 @@
             updateProgress(0, "Iniciando...");
 
             try {
-                // Para simplificar e garantir que não trave, vamos ler o arquivo em pedaços (streaming)
-                // e criar um Blob de saída.
-                const stream = file.stream();
-                const reader = stream.getReader();
-                const decoder = new TextDecoder();
-                
-                let processedSize = 0;
-                let totalSize = file.size;
-                let buffer = "";
-                let headerFound = false;
-                let pointsFound = 0;
-                let pointsWritten = 0;
-                let outputChunks = [];
-                
-                // Cabeçalho básico para o novo arquivo PLY
-                let headerText = "ply\nformat ascii 1.0\nelement vertex {{COUNT}}\nproperty float x\nproperty float y\nproperty float z\nend_header\n";
+                if (isLAS) {
+                    // Optimized path for LAS/LAZ using loaders.gl
+                    updateProgress(10, "Lendo arquivo binário...");
+                    const data = await load(file, LASLoader);
+                    const pos = data.attributes.POSITION.value;
+                    const count = pos.length / 3;
+                    
+                    updateProgress(40, `Processando ${count} pontos...`);
+                    
+                    let outputChunks = [];
+                    let pointsWritten = 0;
+                    let headerText = "ply\nformat ascii 1.0\nelement vertex {{COUNT}}\nproperty float x\nproperty float y\nproperty float z\nend_header\n";
 
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    processedSize += value.length;
-                    const chunk = decoder.decode(value, { stream: true });
-                    buffer += chunk;
-
-                    // Divide por linhas para processar
-                    let lines = buffer.split("\n");
-                    // Mantém a última linha incompleta no buffer
-                    buffer = lines.pop();
-
-                    for (let line of lines) {
-                        line = line.trim();
-                        if (!line) continue;
-
-                        if (!headerFound) {
-                            // Pula cabeçalho do arquivo original (PCD ou PLY)
-                            if (isPCD && line.startsWith("DATA")) {
-                                headerFound = true;
-                            } else if (isPLY && line.startsWith("end_header")) {
-                                headerFound = true;
-                            }
-                            continue;
-                        }
-
-                        // Processamento de dados (considerando formato ASCII por enquanto para simplicidade)
-                        pointsFound++;
-                        
-                        // Seleção estatística baseada no ratio
+                    for (let i = 0; i < pos.length; i += 3) {
                         if (Math.random() < ratio) {
-                            // Tenta extrair X Y Z (assume que são as 3 primeiras colunas)
-                            const parts = line.split(/\s+/);
-                            if (parts.length >= 3) {
-                                const x = parseFloat(parts[0]);
-                                const y = parseFloat(parts[1]);
-                                const z = parseFloat(parts[2]);
-                                
-                                if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
-                                    outputChunks.push(`${x.toFixed(4)} ${y.toFixed(4)} ${z.toFixed(4)}\n`);
-                                    pointsWritten++;
-                                }
-                            }
+                            outputChunks.push(`${pos[i].toFixed(4)} ${pos[i+1].toFixed(4)} ${pos[i+2].toFixed(4)}\n`);
+                            pointsWritten++;
                         }
                     }
 
-                    updateProgress((processedSize / totalSize) * 100, `Processados: ${(processedSize / (1024 * 1024)).toFixed(1)}MB`);
+                    updateProgress(80, "Gerando arquivo de saída...");
+                    const finalHeader = headerText.replace("{{COUNT}}", pointsWritten);
+                    const blob = new Blob([finalHeader, ...outputChunks], { type: "application/octet-stream" });
+                    downloadBlob(blob, `otimizado_${fileName.replace(/\.[^/.]+$/, "")}.ply`);
+                    
+                } else {
+                    // Streaming path for ASCII PCD/PLY
+                    const stream = file.stream();
+                    const reader = stream.getReader();
+                    const decoder = new TextDecoder();
+                    
+                    let processedSize = 0;
+                    let totalSize = file.size;
+                    let buffer = "";
+                    let headerFound = false;
+                    let pointsWritten = 0;
+                    let outputChunks = [];
+                    let headerText = "ply\nformat ascii 1.0\nelement vertex {{COUNT}}\nproperty float x\nproperty float y\nproperty float z\nend_header\n";
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        processedSize += value.length;
+                        const chunk = decoder.decode(value, { stream: true });
+                        buffer += chunk;
+
+                        let lines = buffer.split("\n");
+                        buffer = lines.pop();
+
+                        for (let line of lines) {
+                            line = line.trim();
+                            if (!line) continue;
+
+                            if (!headerFound) {
+                                if (isPCD && line.startsWith("DATA")) headerFound = true;
+                                else if (isPLY && line.startsWith("end_header")) headerFound = true;
+                                continue;
+                            }
+
+                            if (Math.random() < ratio) {
+                                const parts = line.split(/\s+/);
+                                if (parts.length >= 3) {
+                                    const x = parseFloat(parts[0]);
+                                    const y = parseFloat(parts[1]);
+                                    const z = parseFloat(parts[2]);
+                                    if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
+                                        outputChunks.push(`${x.toFixed(4)} ${y.toFixed(4)} ${z.toFixed(4)}\n`);
+                                        pointsWritten++;
+                                    }
+                                }
+                            }
+                        }
+                        updateProgress((processedSize / totalSize) * 100, `Processados: ${(processedSize / (1024 * 1024)).toFixed(1)}MB`);
+                    }
+
+                    const finalHeader = headerText.replace("{{COUNT}}", pointsWritten);
+                    const blob = new Blob([finalHeader, ...outputChunks], { type: "application/octet-stream" });
+                    downloadBlob(blob, `otimizado_${fileName.replace(/\.[^/.]+$/, "")}.ply`);
                 }
 
-                // Finaliza
-                const finalHeader = headerText.replace("{{COUNT}}", pointsWritten);
-                const blob = new Blob([finalHeader, ...outputChunks], { type: "application/octet-stream" });
-                
-                // Download
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `otimizado_${fileName.replace(/\.[^/.]+$/, "")}.ply`;
-                a.click();
-                
                 updateProgress(100, "Concluído!");
                 setTimeout(() => {
                     progressContainer.style.display = 'none';
@@ -576,7 +590,7 @@
 
             } catch (error) {
                 console.error("Erro na otimização:", error);
-                alert("Erro ao processar o arquivo. Certifique-se de que é um arquivo ASCII (Texto). Arquivos binários pesados requerem uma lógica mais complexa.");
+                alert("Erro ao processar o arquivo.");
                 startOptBtn.disabled = false;
                 progressContainer.style.display = 'none';
             }
@@ -616,35 +630,85 @@
                     return;
                 }
 
-                if (fileName.endsWith('.las')) {
-                    updateStatus("Processando LAS (Nuvem de Pontos)...", "#ffd166");
-                    const data = await load(file, LASLoader);
+                if (fileName.endsWith('.las') || fileName.endsWith('.laz')) {
+                    updateStatus(`Processando ${fileName.endsWith('.laz') ? 'LAZ' : 'LAS'}...`, "#ffd166");
+                    
+                    // loaders.gl handles both .las and .laz if dependencies are provided
+                    const data = await load(file, LASLoader, {
+                        las: { skipHeader: false },
+                        worker: true
+                    });
                     
                     geometry = new THREE.BufferGeometry();
                     
                     if (data.attributes.POSITION) {
-                        geometry.setAttribute('position', new THREE.BufferAttribute(data.attributes.POSITION.value, 3));
+                        const pos = data.attributes.POSITION.value;
+                        
+                        // FIX: Large coordinate offsets (GIS)
+                        // Find the local center to avoid precision issues in WebGL
+                        let minX = Infinity, minY = Infinity, minZ = Infinity;
+                        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+                        
+                        for (let i = 0; i < pos.length; i += 3) {
+                            if (pos[i] < minX) minX = pos[i];
+                            if (pos[i+1] < minY) minY = pos[i+1];
+                            if (pos[i+2] < minZ) minZ = pos[i+2];
+                            if (pos[i] > maxX) maxX = pos[i];
+                            if (pos[i+1] > maxY) maxY = pos[i+1];
+                            if (pos[i+2] > maxZ) maxZ = pos[i+2];
+                        }
+                        
+                        const centerX = (minX + maxX) / 2;
+                        const centerY = (minY + maxY) / 2;
+                        const centerZ = (minZ + maxZ) / 2;
+                        
+                        // Shift all points to local center
+                        const shiftedPos = new Float32Array(pos.length);
+                        for (let i = 0; i < pos.length; i += 3) {
+                            shiftedPos[i] = pos[i] - centerX;
+                            shiftedPos[i+1] = pos[i+1] - centerY;
+                            shiftedPos[i+2] = pos[i+2] - centerZ;
+                        }
+                        
+                        geometry.setAttribute('position', new THREE.BufferAttribute(shiftedPos, 3));
+                        
+                        // Store offset in userData for future reference
+                        geometry.userData = { offset: [centerX, centerY, centerZ] };
                     }
                     
+                    let hasColor = false;
                     if (data.attributes.COLOR_0) {
-                        // LAS colors are often 16-bit, loaders.gl might return them as is or normalized
-                        // We use the normalized flag if they are large integers
                         const colorAttr = data.attributes.COLOR_0;
-                        geometry.setAttribute('color', new THREE.BufferAttribute(colorAttr.value, colorAttr.size, colorAttr.value instanceof Uint16Array));
+                        // LAS colors are 16-bit. Normalized flag = true handles 0-65535 -> 0-1
+                        geometry.setAttribute('color', new THREE.BufferAttribute(colorAttr.value, colorAttr.size, true));
+                        hasColor = true;
                     } else if (data.attributes.intensity) {
-                        // If no color, maybe use intensity as grayscale
+                        // Better intensity mapping (Turbo-like colormap)
                         const intensity = data.attributes.intensity.value;
                         const colors = new Float32Array(intensity.length * 3);
+                        
+                        // Simple Turbo-like colormap
                         for (let i = 0; i < intensity.length; i++) {
-                            const val = intensity[i] / 255; // Simple normalization
-                            colors[i * 3] = val;
-                            colors[i * 3 + 1] = val;
-                            colors[i * 3 + 2] = val;
+                            // Normalize intensity (LAS intensity can be 16-bit or 8-bit)
+                            // We'll auto-detect range
+                            let val = intensity[i];
+                            if (val > 255) val /= 65535; else val /= 255;
+                            
+                            // Map to a gradient (Blue -> Cyan -> Green -> Yellow -> Red)
+                            colors[i * 3] = Math.min(Math.max(0, 4 * val - 2), 1); // R
+                            colors[i * 3 + 1] = val < 0.5 ? 2 * val : 2 - 2 * val; // G
+                            colors[i * 3 + 2] = Math.min(Math.max(0, 2 - 4 * val), 1); // B
                         }
                         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                        hasColor = true;
                     }
                     
-                    const material = new THREE.PointsMaterial({ size: 0.05, vertexColors: !!(data.attributes.COLOR_0 || data.attributes.intensity) });
+                    const material = new THREE.PointsMaterial({ 
+                        size: 0.05, 
+                        vertexColors: hasColor,
+                        transparent: false,
+                        opacity: 1
+                    });
                     object = new THREE.Points(geometry, material);
                 } else if (fileName.endsWith('.pcd')) {
                     updateStatus("Processando PCD (Nuvem de Pontos)...", "#ffd166");
