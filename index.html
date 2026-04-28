@@ -439,11 +439,11 @@
                 if (e.dataTransfer.files.length > 0) {
                     const file = e.dataTransfer.files[0];
                     const ext = file.name.toLowerCase().split('.').pop();
-                    if (['las', 'pcd', 'ply', 'obj', 'fbx', 'glb', 'gltf', '3ds', 'max', 'c4d'].includes(ext)) {
+                    if (['las', 'laz', 'pcd', 'ply', 'obj', 'fbx', 'glb', 'gltf', '3ds', 'max', 'c4d'].includes(ext)) {
                         fileInput.files = e.dataTransfer.files; // Sincroniza o input file
                         loadFile(file);
                     } else {
-                        updateStatus("Erro: Formato não suportado. Use .las, .pcd ou .ply", "#ff6b6b");
+                        updateStatus("Erro: Formato não suportado. Use .las, .laz, .pcd, .ply, .obj, etc.", "#ff6b6b");
                     }
                 }
             });
