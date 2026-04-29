@@ -507,7 +507,8 @@
                 if (isLAS) {
                     // Optimized path for LAS/LAZ using loaders.gl
                     updateProgress(10, "Lendo arquivo binário...");
-                    const data = await load(file, LASLoader);
+                    const data = await load(file, LASLoader, { worker: false });
+
                     const pos = data.attributes.POSITION.value;
                     const count = pos.length / 3;
                     
@@ -641,16 +642,15 @@
                     const t0 = performance.now();
                     try {
                         data = await load(file, LASLoader, {
-                            las: { skipHeader: false },
                             worker: false
                         });
                     } catch (workerErr) {
                         console.warn('LAS parse falhou, tentando modo síncrono...', workerErr);
                         data = await load(file, LASLoader, {
-                            las: { skipHeader: false },
                             worker: false
                         });
                     }
+
                     const tParse = (performance.now() - t0).toFixed(0);
 
                     // Validação de dados
@@ -672,37 +672,50 @@
                     if (data.attributes.POSITION) {
                         const pos = data.attributes.POSITION.value;
                         
-                        // FIX: Large coordinate offsets (GIS)
-                        // Find the local center to avoid precision issues in WebGL
-                        let minX = Infinity, minY = Infinity, minZ = Infinity;
-                        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+                        // Use header bounding box if available to avoid a pass
+                        let minX, minY, minZ, maxX, maxY, maxZ;
+                        const header = data.header || data.loaderData?.header || {};
                         
-                        for (let i = 0; i < pos.length; i += 3) {
-                            if (pos[i] < minX) minX = pos[i];
-                            if (pos[i+1] < minY) minY = pos[i+1];
-                            if (pos[i+2] < minZ) minZ = pos[i+2];
-                            if (pos[i] > maxX) maxX = pos[i];
-                            if (pos[i+1] > maxY) maxY = pos[i+1];
-                            if (pos[i+2] > maxZ) maxZ = pos[i+2];
+                        if (header.boundingBox && header.boundingBox[0] && header.boundingBox[1]) {
+                            [minX, minY, minZ] = header.boundingBox[0];
+                            [maxX, maxY, maxZ] = header.boundingBox[1];
+                        } else {
+                            // Fallback to calculation
+                            minX = minY = minZ = Infinity;
+                            maxX = maxY = maxZ = -Infinity;
+                            for (let i = 0; i < pos.length; i += 3) {
+                                if (pos[i] < minX) minX = pos[i];
+                                if (pos[i+1] < minY) minY = pos[i+1];
+                                if (pos[i+2] < minZ) minZ = pos[i+2];
+                                if (pos[i] > maxX) maxX = pos[i];
+                                if (pos[i+1] > maxY) maxY = pos[i+1];
+                                if (pos[i+2] > maxZ) maxZ = pos[i+2];
+                            }
                         }
                         
                         const centerX = (minX + maxX) / 2;
                         const centerY = (minY + maxY) / 2;
                         const centerZ = (minZ + maxZ) / 2;
                         
-                        // Shift all points to local center
-                        const shiftedPos = new Float32Array(pos.length);
-                        for (let i = 0; i < pos.length; i += 3) {
-                            shiftedPos[i] = pos[i] - centerX;
-                            shiftedPos[i+1] = pos[i+1] - centerY;
-                            shiftedPos[i+2] = pos[i+2] - centerZ;
+                        // Only shift if coordinates are large (GIS)
+                        const needsShift = Math.abs(centerX) > 1000 || Math.abs(centerY) > 1000;
+                        
+                        updateStatus("Gerando geometria...", "#ffd166");
+                        console.log(`Gerando geometria (shift: ${needsShift})...`);
+
+                        const shiftedPos = needsShift ? new Float32Array(pos.length) : pos;
+                        if (needsShift) {
+                            for (let i = 0; i < pos.length; i += 3) {
+                                shiftedPos[i] = pos[i] - centerX;
+                                shiftedPos[i+1] = pos[i+1] - centerY;
+                                shiftedPos[i+2] = pos[i+2] - centerZ;
+                            }
                         }
                         
                         geometry.setAttribute('position', new THREE.BufferAttribute(shiftedPos, 3));
-                        
-                        // Store offset in userData for future reference
-                        geometry.userData = { offset: [centerX, centerY, centerZ] };
+                        geometry.userData = { offset: needsShift ? [centerX, centerY, centerZ] : [0,0,0] };
                     }
+
                     
                     let hasColor = false;
                     if (data.attributes.COLOR_0) {

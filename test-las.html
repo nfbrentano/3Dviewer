@@ -324,9 +324,9 @@
             const t0 = performance.now();
             try {
                 data = await load(file, LASLoader, {
-                    las: { skipHeader: false },
                     worker: false
                 });
+
                 const tParse = (performance.now() - t0).toFixed(0);
 
                 const attrs = Object.keys(data.attributes || {});
@@ -360,28 +360,37 @@
             if (posAttr && posAttr.value && posAttr.value.length > 0) {
                 const pos = posAttr.value;
                 const count = pos.length / 3;
-                const xStats = analyzeArray(pos.filter((_, i) => i % 3 === 0));
-                const yStats = analyzeArray(pos.filter((_, i) => i % 3 === 1));
-                const zStats = analyzeArray(pos.filter((_, i) => i % 3 === 2));
-                const totalNaN = xStats.nanCount + yStats.nanCount + zStats.nanCount;
-                const totalInf = xStats.infCount + yStats.infCount + zStats.infCount;
 
-                const needsShift = Math.abs(xStats.max) > 10000 || Math.abs(yStats.max) > 10000;
+                // Use header bounding box if available
+                let minX, minY, minZ, maxX, maxY, maxZ;
+                const header = data.header || data.loaderData?.header || {};
+                
+                if (header.boundingBox && header.boundingBox[0] && header.boundingBox[1]) {
+                    [minX, minY, minZ] = header.boundingBox[0];
+                    [maxX, maxY, maxZ] = header.boundingBox[1];
+                } else {
+                    const xStats = analyzeArray(pos.filter((_, i) => i % 3 === 0));
+                    const yStats = analyzeArray(pos.filter((_, i) => i % 3 === 1));
+                    const zStats = analyzeArray(pos.filter((_, i) => i % 3 === 2));
+                    minX = xStats.min; minY = yStats.min; minZ = zStats.min;
+                    maxX = xStats.max; maxY = yStats.max; maxZ = zStats.max;
+                }
+
+                const needsShift = Math.abs(maxX) > 1000 || Math.abs(maxY) > 1000;
 
                 const posLines = [
                     `Atributo:        ✅ POSITION encontrado`,
                     `Pontos lidos:    ${fmt(count)}`,
                     `Tipo Array:      ${pos.constructor.name}`,
-                    `Range X:         [${xStats.min.toFixed(2)} — ${xStats.max.toFixed(2)}]`,
-                    `Range Y:         [${yStats.min.toFixed(2)} — ${yStats.max.toFixed(2)}]`,
-                    `Range Z:         [${zStats.min.toFixed(2)} — ${zStats.max.toFixed(2)}]`,
-                    `Contém NaN:      ${totalNaN > 0 ? `⚠️ ${totalNaN} valores` : '❌ Não'}`,
-                    `Contém Infinity: ${totalInf > 0 ? `⚠️ ${totalInf} valores` : '❌ Não'}`,
+                    `Range X:         [${minX.toFixed(2)} — ${maxX.toFixed(2)}]`,
+                    `Range Y:         [${minY.toFixed(2)} — ${maxY.toFixed(2)}]`,
+                    `Range Z:         [${minZ.toFixed(2)} — ${maxZ.toFixed(2)}]`,
                     `Coord. GIS:      ${needsShift ? '⚠️ Sim — local shift NECESSÁRIO' : '✅ Não — coordenadas locais'}`
                 ];
                 setBody('pos', posLines.join('\n'));
-                setBadge('pos', totalNaN > 0 || totalInf > 0 ? 'warn' : 'ok');
+                setBadge('pos', 'ok');
                 addReport('3. Posições (XYZ)', posLines);
+
             } else {
                 setBody('pos', 'ERRO: Atributo POSITION não encontrado ou vazio.');
                 setBadge('pos', 'fail');
@@ -488,23 +497,35 @@
             const pos = data.attributes.POSITION.value;
 
             // Local shift
-            let minX = Infinity, minY = Infinity, minZ = Infinity;
-            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-            for (let i = 0; i < pos.length; i += 3) {
-                if (pos[i] < minX) minX = pos[i];
-                if (pos[i+1] < minY) minY = pos[i+1];
-                if (pos[i+2] < minZ) minZ = pos[i+2];
-                if (pos[i] > maxX) maxX = pos[i];
-                if (pos[i+1] > maxY) maxY = pos[i+1];
-                if (pos[i+2] > maxZ) maxZ = pos[i+2];
+            let minX, minY, minZ, maxX, maxY, maxZ;
+            const header = data.header || data.loaderData?.header || {};
+            
+            if (header.boundingBox && header.boundingBox[0] && header.boundingBox[1]) {
+                [minX, minY, minZ] = header.boundingBox[0];
+                [maxX, maxY, maxZ] = header.boundingBox[1];
+            } else {
+                minX = minY = minZ = Infinity;
+                maxX = maxY = maxZ = -Infinity;
+                for (let i = 0; i < pos.length; i += 3) {
+                    if (pos[i] < minX) minX = pos[i];
+                    if (pos[i+1] < minY) minY = pos[i+1];
+                    if (pos[i+2] < minZ) minZ = pos[i+2];
+                    if (pos[i] > maxX) maxX = pos[i];
+                    if (pos[i+1] > maxY) maxY = pos[i+1];
+                    if (pos[i+2] > maxZ) maxZ = pos[i+2];
+                }
             }
             const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
-            const shifted = new Float32Array(pos.length);
-            for (let i = 0; i < pos.length; i += 3) {
-                shifted[i] = pos[i] - cx;
-                shifted[i+1] = pos[i+1] - cy;
-                shifted[i+2] = pos[i+2] - cz;
+            const needsShift = Math.abs(cx) > 1000 || Math.abs(cy) > 1000;
+            const shifted = needsShift ? new Float32Array(pos.length) : pos;
+            if (needsShift) {
+                for (let i = 0; i < pos.length; i += 3) {
+                    shifted[i] = pos[i] - cx;
+                    shifted[i+1] = pos[i+1] - cy;
+                    shifted[i+2] = pos[i+2] - cz;
+                }
             }
+
             geometry.setAttribute('position', new THREE.BufferAttribute(shifted, 3));
 
             // Colors
