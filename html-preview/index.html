@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTML Preview & Export Pro</title>
+    <meta name="description" content="Ferramenta profissional para preview e exportação de HTML para PNG e PDF em alta resolução.">
+    <link rel="stylesheet" href="style.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <header class="app-header">
+            <div class="header-main">
+                <h1>HTML Preview & Export</h1>
+                <div class="actions">
+                    <button id="btn-load-example" class="btn secondary">Exemplo</button>
+                    <button id="btn-clear" class="btn secondary">Limpar</button>
+                    <button id="btn-refresh" class="btn secondary">Atualizar</button>
+                </div>
+            </div>
+            
+            <div class="export-controls">
+                <div class="control-group">
+                    <label for="png-scale">PNG Scale:</label>
+                    <select id="png-scale">
+                        <option value="1">1x</option>
+                        <option value="2" selected>2x (HD)</option>
+                        <option value="3">3x</option>
+                        <option value="4">4x (Ultra)</option>
+                    </select>
+                    <button id="btn-export-png" class="btn primary">Exportar PNG</button>
+                </div>
+                
+                <div class="divider"></div>
+                
+                <div class="control-group">
+                    <label for="pdf-format">PDF:</label>
+                    <select id="pdf-format">
+                        <option value="a4">A4</option>
+                        <option value="letter">Letter</option>
+                    </select>
+                    <select id="pdf-orientation">
+                        <option value="p">Retrato</option>
+                        <option value="l">Paisagem</option>
+                    </select>
+                    <select id="pdf-mode">
+                        <option value="fit">Ajustar 1 pág.</option>
+                        <option value="multi">Múltiplas págs.</option>
+                    </select>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="pdf-margin" checked>
+                        <label for="pdf-margin">Margens</label>
+                    </div>
+                    <button id="btn-export-pdf" class="btn primary">Exportar PDF</button>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="control-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="force-white" checked>
+                        <label for="force-white">Fundo Branco</label>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="app-content">
+            <section class="editor-section">
+                <div class="section-header">
+                    <h2>Editor HTML</h2>
+                    <span class="status" id="last-sync">Salvo</span>
+                </div>
+                <textarea id="html-editor" placeholder="Cole seu HTML aqui..." spellcheck="false"></textarea>
+            </section>
+            
+            <div class="resizer" id="resizer"></div>
+            
+            <section class="preview-section">
+                <div class="section-header">
+                    <h2>Preview</h2>
+                </div>
+                <div class="preview-container">
+                    <iframe id="preview-iframe" title="HTML Preview" sandbox="allow-scripts allow-modals allow-popups allow-same-origin"></iframe>
+                </div>
+            </section>
+        </main>
+
+        <div id="loading-overlay" class="hidden">
+            <div class="loader-content">
+                <div class="spinner"></div>
+                <p id="loading-text">Processando exportação...</p>
+            </div>
+        </div>
+
+        <div id="toast-container"></div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
