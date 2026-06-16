@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Visualizador 3D Pix Force</title>
     <link rel="icon" href="data:,">
+    <link rel="preconnect" href="https://unpkg.com">
+    <link rel="preconnect" href="https://esm.sh">
+    <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/build/three.module.js">
 
     <style>
         body { 
@@ -341,6 +344,14 @@
             border: 1px solid rgba(255,255,255,0.1);
             color: #fff;
         }
+
+        /* Fallbacks de performance para hardware de baixa especificação */
+        body.low-spec #ui-container,
+        body.low-spec #help-card {
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            background: rgba(15, 15, 18, 0.96) !important;
+        }
     </style>
     <!-- Import map for Three.js e Addons -->
     <script type="importmap">
@@ -357,7 +368,6 @@
     </script>
 </head>
 <body>
-    <!-- Drag and drop indicator -->
     <!-- Drag and drop indicator -->
     <div id="drag-overlay"><span>Solte o arquivo (.las, .laz, .pcd, .ply, .obj, .fbx, .glb, .c4d) aqui</span></div>
     
@@ -379,12 +389,15 @@
         <div id="tab-viewer" class="tab-content active">
             <div class="control-group">
                 <label for="file-input">Selecione ou arraste um arquivo local:</label>
-                <input type="file" id="file-input" accept=".las,.laz,.pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds,.max,.c4d">
+                <input type="file" id="file-input" accept=".las,.laz,.pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds">
             </div>
 
-            <div class="control-row">
-                <label for="point-size">Tamanho do Ponto</label>
-                <input type="range" id="point-size" min="0.001" max="1" step="0.001" value="0.05">
+            <div class="control-row" style="flex-wrap: wrap; gap: 4px;">
+                <div style="display: flex; justify-content: space-between; width: 100%;">
+                    <label for="point-size">Tamanho do Ponto</label>
+                    <span id="point-size-val" style="font-size: 0.85rem; color: #aaa;">0.05</span>
+                </div>
+                <input type="range" id="point-size" min="0.001" max="1" step="0.001" value="0.05" style="width: 100%;">
             </div>
 
             <div class="control-row">
@@ -401,6 +414,8 @@
                 <label for="show-grid">Mostrar Grid/Eixos</label>
                 <input type="checkbox" id="show-grid" checked>
             </div>
+            
+            <button id="reset-camera-btn" class="btn-primary" style="margin-top: 5px; background: #3730a3;">Resetar Câmera</button>
         </div>
 
         <!-- Optimizer Tab -->
@@ -408,8 +423,8 @@
             <p style="font-size: 0.8rem; color: #aaa; margin: 0;">Reduza arquivos gigantes (como 10GB+) para versões leves mantendo apenas uma porcentagem dos pontos.</p>
             
             <div class="control-group">
-                <label for="opt-file-input">Arquivo para Otimizar (.las, .laz, .pcd, .ply):</label>
-                <input type="file" id="opt-file-input" accept=".las,.laz,.pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds">
+                <label for="opt-file-input">Arquivos para Otimizar e Juntar (.las, .laz, .pcd, .ply):</label>
+                <input type="file" id="opt-file-input" accept=".las,.laz,.pcd,.ply,.obj,.fbx,.glb,.gltf,.3ds" multiple>
             </div>
 
             <div class="control-row">
@@ -423,7 +438,22 @@
                 </select>
             </div>
 
-            <button id="start-opt-btn" class="btn-primary">Processar e Salvar Como .PLY</button>
+            <div class="control-row">
+                <label for="opt-keep-colors">Manter Cores Originais</label>
+                <input type="checkbox" id="opt-keep-colors" checked>
+            </div>
+
+            <div class="control-row">
+                <label for="opt-format">Formato de Saída</label>
+                <select id="opt-format" style="background: #2a2a35; color: white; border: 1px solid rgba(255,255,255,0.1); padding: 5px; border-radius: 4px;">
+                    <option value="binary" selected>PLY (Binário - Rápido)</option>
+                    <option value="ascii">PLY (ASCII - Texto)</option>
+                    <option value="pcd_binary">PCD (Binário - Nuvem de Pontos)</option>
+                    <option value="pcd_ascii">PCD (ASCII - Texto)</option>
+                </select>
+            </div>
+
+            <button id="start-opt-btn" class="btn-primary">Processar e Salvar</button>
 
             <div id="progress-container">
                 <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
@@ -489,27 +519,34 @@
         import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
         import { TDSLoader } from 'three/addons/loaders/TDSLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { load } from '@loaders.gl/core';
+        import { load, parse } from '@loaders.gl/core';
         import { LASLoader } from '@loaders.gl/las';
 
         // Variáveis globais
         let scene, camera, renderer, controls;
         let pointCloud;
         let gridHelper, axesHelper;
+        let defaultCameraZ = 5;
+        let animId = null;
 
         // Referências do DOM
         const statusEl = document.getElementById('status');
         const fileInput = document.getElementById('file-input');
         const pointSizeInput = document.getElementById('point-size');
+        const pointSizeVal = document.getElementById('point-size-val');
         const useOriginalColorInput = document.getElementById('use-original-color');
         const customColorInput = document.getElementById('custom-color');
+        const colorPickerRow = document.getElementById('color-picker-row');
         const showGridInput = document.getElementById('show-grid');
         const dragOverlay = document.getElementById('drag-overlay');
+        const resetCameraBtn = document.getElementById('reset-camera-btn');
 
         // Optimizer references
         const optFileInput = document.getElementById('opt-file-input');
         const startOptBtn = document.getElementById('start-opt-btn');
         const optRatioSelect = document.getElementById('opt-ratio');
+        const optKeepColorsInput = document.getElementById('opt-keep-colors');
+        const optFormatSelect = document.getElementById('opt-format');
         const progressContainer = document.getElementById('progress-container');
         const progressBarFill = document.getElementById('progress-bar-fill');
         const progressStatus = document.getElementById('progress-status');
@@ -524,8 +561,35 @@
             document.getElementById(`tab-${tabName}`).classList.add('active');
         };
 
+        // Detecção de hardware para aplicar otimizações dinâmicas
+        function detectLowEndHardware() {
+            let isLowEnd = false;
+            if (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) {
+                isLowEnd = true;
+            }
+            if (navigator.deviceMemory && navigator.deviceMemory <= 4) {
+                isLowEnd = true;
+            }
+            try {
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (gl) {
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (debugInfo) {
+                        const rendererName = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '';
+                        if (/intel|mesa|swiftshader|llvmpipe|microsoft|software/i.test(rendererName)) {
+                            isLowEnd = true;
+                        }
+                    }
+                }
+            } catch (e) {
+                isLowEnd = true;
+            }
+            return isLowEnd;
+        }
+
         init();
-        animate();
+        render();
 
         function init() {
             // Cena principal e cor de fundo
@@ -542,9 +606,19 @@
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 10000);
             camera.position.set(0, 0, 5);
 
+            // Configurações baseadas em desempenho de hardware
+            const isLowSpec = detectLowEndHardware();
+            if (isLowSpec) {
+                document.body.classList.add('low-spec');
+                console.log("Hardware de especificação modesta detectado. Aplicando otimizações.");
+            }
+
             // Renderizador
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: !isLowSpec,
+                powerPreference: 'high-performance'
+            });
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, isLowSpec ? 1.0 : 1.5));
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
@@ -557,8 +631,12 @@
             controls.listenToKeyEvents(window);
             controls.keyPanSpeed = 15.0; // Velocidade do Pan com Shift + Setas
 
+            // Trigger animation on control changes (handles damping and mouse interactions)
+            controls.addEventListener('change', startAnimation);
+
             // Event Listeners
             window.addEventListener('resize', onWindowResize);
+            resetCameraBtn.addEventListener('click', resetCamera);
             
             // Teclas customizadas (+ e - para Zoom, Setas para Rotacionar/Pan)
             window.addEventListener('keydown', (e) => {
@@ -569,9 +647,11 @@
                 if (e.key === '+' || e.key === '=') {
                     camera.position.multiplyScalar(1 / zoomFactor);
                     controls.update();
+                    render();
                 } else if (e.key === '-' || e.key === '_') {
                     camera.position.multiplyScalar(zoomFactor);
                     controls.update();
+                    render();
                 }
                 
                 // Rotacionar com Setas (apenas se Shift não estiver pressionado)
@@ -580,15 +660,19 @@
                     if (e.key === 'ArrowLeft') {
                         controls.setAzimuthalAngle(controls.getAzimuthalAngle() + rotateStep);
                         controls.update();
+                        render();
                     } else if (e.key === 'ArrowRight') {
                         controls.setAzimuthalAngle(controls.getAzimuthalAngle() - rotateStep);
                         controls.update();
+                        render();
                     } else if (e.key === 'ArrowUp') {
                         controls.setPolarAngle(controls.getPolarAngle() - rotateStep);
                         controls.update();
+                        render();
                     } else if (e.key === 'ArrowDown') {
                         controls.setPolarAngle(controls.getPolarAngle() + rotateStep);
                         controls.update();
+                        render();
                     }
                 }
             });
@@ -655,10 +739,79 @@
             showGridInput.addEventListener('change', (e) => {
                 gridHelper.visible = e.target.checked;
                 axesHelper.visible = e.target.checked;
+                render();
             });
 
             // Listener do Otimizador
             startOptBtn.addEventListener('click', startOptimization);
+        }
+
+        class Float32BufferBuilder {
+            constructor(chunkSize = 900000) { // 300k pontos por chunk
+                this.chunkSize = chunkSize;
+                this.chunks = [];
+                this.currentChunk = new Float32Array(chunkSize);
+                this.currentIndex = 0;
+                this.totalLength = 0;
+            }
+            push(x, y, z) {
+                if (this.currentIndex + 3 > this.chunkSize) {
+                    this.chunks.push(this.currentChunk.subarray(0, this.currentIndex));
+                    this.currentChunk = new Float32Array(this.chunkSize);
+                    this.currentIndex = 0;
+                }
+                this.currentChunk[this.currentIndex++] = x;
+                this.currentChunk[this.currentIndex++] = y;
+                this.currentChunk[this.currentIndex++] = z;
+                this.totalLength += 3;
+            }
+            build() {
+                if (this.currentIndex > 0) {
+                    this.chunks.push(this.currentChunk.subarray(0, this.currentIndex));
+                    this.currentChunk = null;
+                }
+                const finalArray = new Float32Array(this.totalLength);
+                let offset = 0;
+                for (const chunk of this.chunks) {
+                    finalArray.set(chunk, offset);
+                    offset += chunk.length;
+                }
+                return finalArray;
+            }
+        }
+
+        class Uint8BufferBuilder {
+            constructor(chunkSize = 900000) { // 300k pontos por chunk
+                this.chunkSize = chunkSize;
+                this.chunks = [];
+                this.currentChunk = new Uint8Array(chunkSize);
+                this.currentIndex = 0;
+                this.totalLength = 0;
+            }
+            push(r, g, b) {
+                if (this.currentIndex + 3 > this.chunkSize) {
+                    this.chunks.push(this.currentChunk.subarray(0, this.currentIndex));
+                    this.currentChunk = new Uint8Array(this.chunkSize);
+                    this.currentIndex = 0;
+                }
+                this.currentChunk[this.currentIndex++] = r;
+                this.currentChunk[this.currentIndex++] = g;
+                this.currentChunk[this.currentIndex++] = b;
+                this.totalLength += 3;
+            }
+            build() {
+                if (this.currentIndex > 0) {
+                    this.chunks.push(this.currentChunk.subarray(0, this.currentIndex));
+                    this.currentChunk = null;
+                }
+                const finalArray = new Uint8Array(this.totalLength);
+                let offset = 0;
+                for (const chunk of this.chunks) {
+                    finalArray.set(chunk, offset);
+                    offset += chunk.length;
+                }
+                return finalArray;
+            }
         }
 
         function downloadBlob(blob, fileName) {
@@ -671,108 +824,389 @@
         }
 
         async function startOptimization() {
-            const file = optFileInput.files[0];
-            if (!file) {
-                alert("Selecione um arquivo primeiro!");
+            const files = optFileInput.files;
+            if (files.length === 0) {
+                alert("Selecione pelo menos um arquivo primeiro!");
                 return;
             }
 
             const ratio = parseFloat(optRatioSelect.value);
-            const fileName = file.name;
-            const isLAS = fileName.toLowerCase().endsWith('.las') || fileName.toLowerCase().endsWith('.laz');
-            const isPCD = fileName.toLowerCase().endsWith('.pcd');
-            const isPLY = fileName.toLowerCase().endsWith('.ply');
-
-            if (!isPCD && !isPLY && !isLAS) {
-                alert("O otimizador suporta apenas .las, .laz, .pcd e .ply");
-                return;
+            const keepColors = optKeepColorsInput.checked;
+            const outputFormat = optFormatSelect.value;
+            
+            // Verifica formatos
+            for (let i = 0; i < files.length; i++) {
+                const fileName = files[i].name.toLowerCase();
+                const isLAS = fileName.endsWith('.las') || fileName.endsWith('.laz');
+                const isPCD = fileName.endsWith('.pcd');
+                const isPLY = fileName.endsWith('.ply');
+                if (!isPCD && !isPLY && !isLAS) {
+                    alert(`O otimizador suporta apenas .las, .laz, .pcd e .ply. O arquivo ${fileName} não é suportado.`);
+                    return;
+                }
             }
 
             startOptBtn.disabled = true;
             progressContainer.style.display = 'flex';
-            updateProgress(0, "Iniciando...");
+            updateProgress(0, "Iniciando processo em lote...");
+
+            const getIntensityColor = (intensityVal) => {
+                let val = intensityVal;
+                if (val > 255) val /= 65535; else val /= 255;
+                const r = Math.min(Math.max(0, 4 * val - 2), 1) * 255;
+                const g = (val < 0.5 ? 2 * val : 2 - 2 * val) * 255;
+                const b = Math.min(Math.max(0, 2 - 4 * val), 1) * 255;
+                return [Math.round(r), Math.round(g), Math.round(b)];
+            };
+
+            let globalMergedPos = new Float32BufferBuilder();
+            let globalMergedColors = new Uint8BufferBuilder();
+            let globalHasColors = false;
 
             try {
-                if (isLAS) {
-                    // Optimized path for LAS/LAZ using loaders.gl
-                    updateProgress(10, "Lendo arquivo binário...");
-                    const data = await load(file, LASLoader, { worker: false });
-
-                    const pos = data.attributes.POSITION.value;
-                    const count = pos.length / 3;
+                for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+                    const file = files[fileIdx];
+                    const fileName = file.name;
+                    const isLAS = fileName.toLowerCase().endsWith('.las') || fileName.toLowerCase().endsWith('.laz');
+                    const isPCD = fileName.toLowerCase().endsWith('.pcd');
+                    const isPLY = fileName.toLowerCase().endsWith('.ply');
                     
-                    updateProgress(40, `Processando ${count} pontos...`);
+                    const progressBase = (fileIdx / files.length) * 100;
+                    const progressStep = 100 / files.length;
                     
-                    let outputChunks = [];
-                    let pointsWritten = 0;
-                    let headerText = "ply\nformat ascii 1.0\nelement vertex {{COUNT}}\nproperty float x\nproperty float y\nproperty float z\nend_header\n";
+                    updateProgress(progressBase, `[${fileIdx + 1}/${files.length}] Lendo ${fileName}...`);
 
-                    for (let i = 0; i < pos.length; i += 3) {
-                        if (Math.random() < ratio) {
-                            outputChunks.push(`${pos[i].toFixed(4)} ${pos[i+1].toFixed(4)} ${pos[i+2].toFixed(4)}\n`);
-                            pointsWritten++;
-                        }
-                    }
+                    if (isLAS) {
+                        const arrayBuffer = await file.arrayBuffer();
+                        const data = await parse(arrayBuffer, LASLoader, { worker: false });
 
-                    updateProgress(80, "Gerando arquivo de saída...");
-                    const finalHeader = headerText.replace("{{COUNT}}", pointsWritten);
-                    const blob = new Blob([finalHeader, ...outputChunks], { type: "application/octet-stream" });
-                    downloadBlob(blob, `otimizado_${fileName.replace(/\.[^/.]+$/, "")}.ply`);
-                    
-                } else {
-                    // Streaming path for ASCII PCD/PLY
-                    const stream = file.stream();
-                    const reader = stream.getReader();
-                    const decoder = new TextDecoder();
-                    
-                    let processedSize = 0;
-                    let totalSize = file.size;
-                    let buffer = "";
-                    let headerFound = false;
-                    let pointsWritten = 0;
-                    let outputChunks = [];
-                    let headerText = "ply\nformat ascii 1.0\nelement vertex {{COUNT}}\nproperty float x\nproperty float y\nproperty float z\nend_header\n";
-
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-
-                        processedSize += value.length;
-                        const chunk = decoder.decode(value, { stream: true });
-                        buffer += chunk;
-
-                        let lines = buffer.split("\n");
-                        buffer = lines.pop();
-
-                        for (let line of lines) {
-                            line = line.trim();
-                            if (!line) continue;
-
-                            if (!headerFound) {
-                                if (isPCD && line.startsWith("DATA")) headerFound = true;
-                                else if (isPLY && line.startsWith("end_header")) headerFound = true;
-                                continue;
-                            }
-
+                        const pos = data.attributes.POSITION.value;
+                        const count = pos.length / 3;
+                        
+                        let indices = [];
+                        for (let i = 0; i < count; i++) {
                             if (Math.random() < ratio) {
-                                const parts = line.split(/\s+/);
-                                if (parts.length >= 3) {
-                                    const x = parseFloat(parts[0]);
-                                    const y = parseFloat(parts[1]);
-                                    const z = parseFloat(parts[2]);
-                                    if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
-                                        outputChunks.push(`${x.toFixed(4)} ${y.toFixed(4)} ${z.toFixed(4)}\n`);
-                                        pointsWritten++;
+                                indices.push(i);
+                            }
+                        }
+
+                        let fileHasColors = false;
+                        let colorData = null;
+                        
+                        if (keepColors) {
+                            if (data.attributes.COLOR_0) {
+                                const colorAttr = data.attributes.COLOR_0;
+                                const colorVal = colorAttr.value;
+                                const size = colorAttr.size || Math.round(colorVal.length / count);
+                                
+                                let maxVal = 0;
+                                const sampleLen = Math.min(size * 100, colorVal.length);
+                                for (let k = 0; k < sampleLen; k++) {
+                                    if (colorVal[k] > maxVal) maxVal = colorVal[k];
+                                }
+                                
+                                let scaleColor;
+                                if (colorVal instanceof Float32Array || colorVal instanceof Float64Array) {
+                                    scaleColor = (val) => Math.min(255, Math.max(0, Math.round(val * 255)));
+                                } else if (maxVal > 255) {
+                                    scaleColor = (val) => Math.min(255, Math.max(0, Math.round(val / 256)));
+                                } else {
+                                    scaleColor = (val) => Math.min(255, Math.max(0, Math.round(val)));
+                                }
+                                
+                                colorData = new Uint8Array(count * 3);
+                                for (let i = 0; i < count; i++) {
+                                    colorData[i * 3] = scaleColor(colorVal[i * size]);
+                                    colorData[i * 3 + 1] = scaleColor(colorVal[i * size + 1]);
+                                    colorData[i * 3 + 2] = scaleColor(colorVal[i * size + 2]);
+                                }
+                                fileHasColors = true;
+                                globalHasColors = true;
+                            } else if (data.attributes.intensity) {
+                                const intensityVal = data.attributes.intensity.value;
+                                colorData = new Uint8Array(count * 3);
+                                for (let i = 0; i < count; i++) {
+                                    const [r, g, b] = getIntensityColor(intensityVal[i]);
+                                    colorData[i * 3] = r;
+                                    colorData[i * 3 + 1] = g;
+                                    colorData[i * 3 + 2] = b;
+                                }
+                                fileHasColors = true;
+                                globalHasColors = true;
+                            }
+                        }
+
+                        updateProgress(progressBase + progressStep * 0.5, `[${fileIdx + 1}/${files.length}] Adicionando pontos de ${fileName}...`);
+                        
+                        for (const p of indices) {
+                            globalMergedPos.push(pos[p * 3], pos[p * 3 + 1], pos[p * 3 + 2]);
+                            if (keepColors) {
+                                if (fileHasColors && colorData) {
+                                    globalMergedColors.push(colorData[p * 3], colorData[p * 3 + 1], colorData[p * 3 + 2]);
+                                } else {
+                                    globalMergedColors.push(255, 255, 255);
+                                }
+                            }
+                        }
+                    } else {
+                        // Streaming path for ASCII PCD/PLY
+                        const stream = file.stream();
+                        const reader = stream.getReader();
+                        const decoder = new TextDecoder();
+                        
+                        let processedSize = 0;
+                        let totalSize = file.size;
+                        let buffer = "";
+                        let headerFound = false;
+                        
+                        let xIdx = 0, yIdx = 1, zIdx = 2;
+                        let rIdx = -1, gIdx = -1, bIdx = -1;
+                        let rgbIdx = -1;
+                        let inVertexElement = false;
+                        let propertyCount = 0;
+
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+
+                            processedSize += value.length;
+                            const chunk = decoder.decode(value, { stream: true });
+                            buffer += chunk;
+
+                            let lines = buffer.split("\n");
+                            buffer = lines.pop();
+
+                            for (let line of lines) {
+                                line = line.trim();
+                                if (!line) continue;
+
+                                if (!headerFound) {
+                                    if (isPCD && line.startsWith("FIELDS")) {
+                                        const fields = line.substring(7).trim().split(/\s+/);
+                                        xIdx = fields.indexOf('x');
+                                        yIdx = fields.indexOf('y');
+                                        zIdx = fields.indexOf('z');
+                                        rIdx = fields.indexOf('r');
+                                        gIdx = fields.indexOf('g');
+                                        bIdx = fields.indexOf('b');
+                                        rgbIdx = fields.indexOf('rgb');
+                                        if (rgbIdx === -1) rgbIdx = fields.indexOf('rgba');
+                                        
+                                        if (rIdx === -1 && rgbIdx === -1) {
+                                            const intensityIdx = fields.indexOf('intensity');
+                                            if (intensityIdx !== -1) rIdx = intensityIdx;
+                                        }
+                                    }
+                                    if (isPCD && line.startsWith("DATA")) {
+                                        headerFound = true;
+                                    } else if (isPLY && line.startsWith("end_header")) {
+                                        headerFound = true;
+                                    } else if (isPLY && line.startsWith("element vertex")) {
+                                        inVertexElement = true;
+                                    } else if (isPLY && line.startsWith("element")) {
+                                        inVertexElement = false;
+                                    } else if (isPLY && inVertexElement && line.startsWith("property")) {
+                                        const parts = line.split(/\s+/);
+                                        const propName = parts[parts.length - 1];
+                                        if (propName === 'x') xIdx = propertyCount;
+                                        else if (propName === 'y') yIdx = propertyCount;
+                                        else if (propName === 'z') zIdx = propertyCount;
+                                        else if (propName === 'red' || propName === 'r') rIdx = propertyCount;
+                                        else if (propName === 'green' || propName === 'g') gIdx = propertyCount;
+                                        else if (propName === 'blue' || propName === 'b') bIdx = propertyCount;
+                                        propertyCount++;
+                                    }
+                                    continue;
+                                }
+
+                                if (Math.random() < ratio) {
+                                    const parts = line.split(/\s+/);
+                                    if (parts.length > Math.max(xIdx, yIdx, zIdx)) {
+                                        const x = parseFloat(parts[xIdx]);
+                                        const y = parseFloat(parts[yIdx]);
+                                        const z = parseFloat(parts[zIdx]);
+                                        if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
+                                            globalMergedPos.push(x, y, z);
+                                            
+                                            if (keepColors) {
+                                                let r = 255, g = 255, b = 255;
+                                                let hasC = false;
+                                                if (rgbIdx !== -1 && parts[rgbIdx]) {
+                                                    const rgbVal = parseFloat(parts[rgbIdx]);
+                                                    if (!isNaN(rgbVal)) {
+                                                        const floatArr = new Float32Array([rgbVal]);
+                                                        const intArr = new Int32Array(floatArr.buffer);
+                                                        const rgbInt = intArr[0];
+                                                        r = (rgbInt >> 16) & 0xff;
+                                                        g = (rgbInt >> 8) & 0xff;
+                                                        b = rgbInt & 0xff;
+                                                        hasC = true;
+                                                    }
+                                                } else if (rIdx !== -1 && gIdx !== -1 && bIdx !== -1 && parts[rIdx] && parts[gIdx] && parts[bIdx]) {
+                                                    r = Math.round(parseFloat(parts[rIdx]));
+                                                    g = Math.round(parseFloat(parts[gIdx]));
+                                                    b = Math.round(parseFloat(parts[bIdx]));
+                                                    if (isNaN(r)) r = 255;
+                                                    if (isNaN(g)) g = 255;
+                                                    if (isNaN(b)) b = 255;
+                                                    hasC = true;
+                                                } else if (rIdx !== -1 && parts[rIdx]) {
+                                                    const intensityVal = parseFloat(parts[rIdx]);
+                                                    if (!isNaN(intensityVal)) {
+                                                        [r, g, b] = getIntensityColor(intensityVal);
+                                                        hasC = true;
+                                                    }
+                                                }
+                                                if (hasC) globalHasColors = true;
+                                                globalMergedColors.push(r, g, b);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            updateProgress(progressBase + ((processedSize / totalSize) * progressStep), `[${fileIdx + 1}/${files.length}] Processando...`);
+                        }
+                        
+                        // Process remaining buffer
+                        if (buffer.trim() && headerFound && Math.random() < ratio) {
+                            const line = buffer.trim();
+                            const parts = line.split(/\s+/);
+                            if (parts.length > Math.max(xIdx, yIdx, zIdx)) {
+                                const x = parseFloat(parts[xIdx]);
+                                const y = parseFloat(parts[yIdx]);
+                                const z = parseFloat(parts[zIdx]);
+                                if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
+                                    globalMergedPos.push(x, y, z);
+                                    if (keepColors) {
+                                        let r = 255, g = 255, b = 255;
+                                        if (rgbIdx !== -1 && parts[rgbIdx]) {
+                                            const rgbVal = parseFloat(parts[rgbIdx]);
+                                            if (!isNaN(rgbVal)) {
+                                                const floatArr = new Float32Array([rgbVal]);
+                                                const intArr = new Int32Array(floatArr.buffer);
+                                                const rgbInt = intArr[0];
+                                                r = (rgbInt >> 16) & 0xff;
+                                                g = (rgbInt >> 8) & 0xff;
+                                                b = rgbInt & 0xff;
+                                            }
+                                        } else if (rIdx !== -1 && gIdx !== -1 && bIdx !== -1 && parts[rIdx] && parts[gIdx] && parts[bIdx]) {
+                                            r = Math.round(parseFloat(parts[rIdx]));
+                                            g = Math.round(parseFloat(parts[gIdx]));
+                                            b = Math.round(parseFloat(parts[bIdx]));
+                                            if (isNaN(r)) r = 255;
+                                            if (isNaN(g)) g = 255;
+                                            if (isNaN(b)) b = 255;
+                                        } else if (rIdx !== -1 && parts[rIdx]) {
+                                            const intensityVal = parseFloat(parts[rIdx]);
+                                            if (!isNaN(intensityVal)) {
+                                                [r, g, b] = getIntensityColor(intensityVal);
+                                            }
+                                        }
+                                        globalMergedColors.push(r, g, b);
                                     }
                                 }
                             }
                         }
-                        updateProgress((processedSize / totalSize) * 100, `Processados: ${(processedSize / (1024 * 1024)).toFixed(1)}MB`);
                     }
+                } // End file loop
 
-                    const finalHeader = headerText.replace("{{COUNT}}", pointsWritten);
-                    const blob = new Blob([finalHeader, ...outputChunks], { type: "application/octet-stream" });
-                    downloadBlob(blob, `otimizado_${fileName.replace(/\.[^/.]+$/, "")}.ply`);
+                // Escrevendo o arquivo final mesclado
+                updateProgress(90, "Gerando arquivo consolidado final...");
+                
+                globalMergedPos = globalMergedPos.build();
+                globalMergedColors = globalMergedColors.build();
+                
+                const pointsWritten = globalMergedPos.length / 3;
+                const finalHasColors = keepColors && globalHasColors;
+                
+                let outNameBase = files.length === 1 ? files[0].name.replace(/\.[^/.]+$/, "") : "nuvem_mesclada";
+
+                let headerText = "";
+                if (outputFormat === 'binary' || outputFormat === 'pcd_binary') {
+                    let isPLY = outputFormat === 'binary';
+                    
+                    if (isPLY) {
+                        headerText = `ply\nformat binary_little_endian 1.0\nelement vertex ${pointsWritten}\nproperty float x\nproperty float y\nproperty float z\n`;
+                        if (finalHasColors) {
+                            headerText += "property uchar red\nproperty uchar green\nproperty uchar blue\n";
+                        }
+                        headerText += "end_header\n";
+                    } else {
+                        headerText = `# .PCD v0.7 - Point Cloud Data file format\nVERSION 0.7\n`;
+                        headerText += `FIELDS x y z${finalHasColors ? ' rgb' : ''}\n`;
+                        headerText += `SIZE 4 4 4${finalHasColors ? ' 4' : ''}\n`;
+                        headerText += `TYPE F F F${finalHasColors ? ' U' : ''}\n`;
+                        headerText += `COUNT 1 1 1${finalHasColors ? ' 1' : ''}\n`;
+                        headerText += `WIDTH ${pointsWritten}\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS ${pointsWritten}\nDATA binary\n`;
+                    }
+                    
+                    const headerBytes = new TextEncoder().encode(headerText);
+                    const bytesPerPoint = finalHasColors ? (isPLY ? 15 : 16) : 12;
+                    const buffer = new ArrayBuffer(pointsWritten * bytesPerPoint);
+                    const view = new DataView(buffer);
+                    let offset = 0;
+                    
+                    for (let i = 0; i < pointsWritten; i++) {
+                        view.setFloat32(offset, globalMergedPos[i * 3], true);
+                        view.setFloat32(offset + 4, globalMergedPos[i * 3 + 1], true);
+                        view.setFloat32(offset + 8, globalMergedPos[i * 3 + 2], true);
+                        offset += 12;
+                        
+                        if (finalHasColors) {
+                            if (isPLY) {
+                                view.setUint8(offset, globalMergedColors[i * 3]);
+                                view.setUint8(offset + 1, globalMergedColors[i * 3 + 1]);
+                                view.setUint8(offset + 2, globalMergedColors[i * 3 + 2]);
+                                offset += 3;
+                            } else {
+                                const rgbInt = (globalMergedColors[i * 3] << 16) | (globalMergedColors[i * 3 + 1] << 8) | globalMergedColors[i * 3 + 2];
+                                view.setUint32(offset, rgbInt, true);
+                                offset += 4;
+                            }
+                        }
+                    }
+                    
+                    const finalBlob = new Blob([headerBytes, buffer], { type: "application/octet-stream" });
+                    downloadBlob(finalBlob, `otimizado_${outNameBase}.${isPLY ? 'ply' : 'pcd'}`);
+                    
+                } else {
+                    let isPLY = outputFormat === 'ascii';
+                    
+                    if (isPLY) {
+                        headerText = `ply\nformat ascii 1.0\nelement vertex ${pointsWritten}\nproperty float x\nproperty float y\nproperty float z\n`;
+                        if (finalHasColors) {
+                            headerText += "property uchar red\nproperty uchar green\nproperty uchar blue\n";
+                        }
+                        headerText += "end_header\n";
+                    } else {
+                        headerText = `# .PCD v0.7 - Point Cloud Data file format\nVERSION 0.7\n`;
+                        headerText += `FIELDS x y z${finalHasColors ? ' rgb' : ''}\n`;
+                        headerText += `SIZE 4 4 4${finalHasColors ? ' 4' : ''}\n`;
+                        headerText += `TYPE F F F${finalHasColors ? ' U' : ''}\n`;
+                        headerText += `COUNT 1 1 1${finalHasColors ? ' 1' : ''}\n`;
+                        headerText += `WIDTH ${pointsWritten}\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS ${pointsWritten}\nDATA ascii\n`;
+                    }
+                    
+                    const outputChunks = [headerText];
+                    for (let i = 0; i < pointsWritten; i++) {
+                        const x = globalMergedPos[i * 3].toFixed(4);
+                        const y = globalMergedPos[i * 3 + 1].toFixed(4);
+                        const z = globalMergedPos[i * 3 + 2].toFixed(4);
+                        
+                        if (finalHasColors) {
+                            if (isPLY) {
+                                outputChunks.push(`${x} ${y} ${z} ${globalMergedColors[i*3]} ${globalMergedColors[i*3+1]} ${globalMergedColors[i*3+2]}\n`);
+                            } else {
+                                const rgbInt = (globalMergedColors[i * 3] << 16) | (globalMergedColors[i * 3 + 1] << 8) | globalMergedColors[i * 3 + 2];
+                                outputChunks.push(`${x} ${y} ${z} ${rgbInt}\n`);
+                            }
+                        } else {
+                            outputChunks.push(`${x} ${y} ${z}\n`);
+                        }
+                    }
+                    
+                    const blob = new Blob(outputChunks, { type: "application/octet-stream" });
+                    downloadBlob(blob, `otimizado_${outNameBase}.${isPLY ? 'ply' : 'pcd'}`);
                 }
 
                 updateProgress(100, "Concluído!");
@@ -782,8 +1216,8 @@
                 }, 3000);
 
             } catch (error) {
-                console.error("Erro na otimização:", error);
-                alert("Erro ao processar o arquivo.");
+                console.error("Erro na otimização em lote:", error);
+                alert("Erro ao processar os arquivos.");
                 startOptBtn.disabled = false;
                 progressContainer.style.display = 'none';
             }
@@ -798,6 +1232,28 @@
         function updateStatus(text, color = "#aaa") {
             statusEl.textContent = text;
             statusEl.style.color = color;
+        }
+
+        function disposeObject(obj) {
+            if (!obj) return;
+            obj.traverse(child => {
+                if (child.geometry) {
+                    child.geometry.dispose();
+                }
+                if (child.material) {
+                    const materials = Array.isArray(child.material) ? child.material : [child.material];
+                    materials.forEach(m => {
+                        if (m.map) m.map.dispose();
+                        if (m.lightMap) m.lightMap.dispose();
+                        if (m.bumpMap) m.bumpMap.dispose();
+                        if (m.normalMap) m.normalMap.dispose();
+                        if (m.specularMap) m.specularMap.dispose();
+                        if (m.envMap) m.envMap.dispose();
+                        m.dispose();
+                    });
+                }
+            });
+            scene.remove(obj);
         }
 
         async function loadFile(file) {
@@ -830,11 +1286,11 @@
                     let data;
                     const t0 = performance.now();
                     try {
-                        data = await load(file, LASLoader, {
+                        data = await parse(arrayBuffer, LASLoader, {
                             worker: false
                         });
                     } catch (workerErr) {
-                        console.warn('LAS parse falhou, tentando modo síncrono...', workerErr);
+                        console.warn('LAS parse falhou, tentando load...', workerErr);
                         data = await load(file, LASLoader, {
                             worker: false
                         });
@@ -1024,17 +1480,10 @@
                     scene.add(ambientLight);
                 }
                 
-                // Remove objeto anterior se existir
+                // Remove objeto anterior se existir e limpa recursos
                 if (pointCloud) {
-                    scene.remove(pointCloud);
-                    if (pointCloud.geometry) pointCloud.geometry.dispose();
-                    if (pointCloud.material) {
-                        if (Array.isArray(pointCloud.material)) {
-                            pointCloud.material.forEach(m => m.dispose());
-                        } else {
-                            pointCloud.material.dispose();
-                        }
-                    }
+                    disposeObject(pointCloud);
+                    pointCloud = null;
                 }
 
                 pointCloud = object; // Pode ser Points, Mesh ou Group
@@ -1057,6 +1506,7 @@
                 let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
                 cameraZ *= 1.8; 
                 
+                defaultCameraZ = cameraZ;
                 camera.position.set(0, 0, cameraZ);
                 controls.target.set(0, 0, 0);
                 controls.update();
@@ -1067,11 +1517,22 @@
                 pointSizeInput.min = maxDim * 0.0001;
                 pointSizeInput.step = maxDim * 0.0001;
                 pointSizeInput.value = initialPointSize;
+                pointSizeVal.textContent = initialPointSize.toFixed(4);
 
                 scene.add(pointCloud);
                 updatePointCloudMaterial();
 
-                updateStatus(`Arquivo ${fileName.split('.').pop().toUpperCase()} carregado`, "#06d6a0");
+                // Count total points
+                let totalPoints = 0;
+                object.traverse((child) => {
+                    if (child.isPoints && child.geometry.attributes.position) {
+                        totalPoints += child.geometry.attributes.position.count;
+                    } else if (child.isMesh && child.geometry.attributes.position) {
+                        totalPoints += child.geometry.attributes.position.count;
+                    }
+                });
+                const pointCountStr = totalPoints > 0 ? ` (${totalPoints.toLocaleString()} pontos)` : '';
+                updateStatus(`Arquivo ${fileName.split('.').pop().toUpperCase()} carregado${pointCountStr}`, "#06d6a0");
             } catch (error) {
                 console.error("Erro no processamento do arquivo:", error);
                 updateStatus("Erro ao abrir o arquivo.", "#ff6b6b");
@@ -1084,6 +1545,7 @@
             const useOriginal = useOriginalColorInput.checked;
             const customColor = customColorInput.value;
             const pointSize = parseFloat(pointSizeInput.value);
+            pointSizeVal.textContent = pointSize.toFixed(4);
 
             pointCloud.traverse((child) => {
                 if (child.material) {
@@ -1110,19 +1572,45 @@
                     });
                 }
             });
+            render();
         }
 
+        let resizeTimeout;
         function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                render();
+            }, 100);
+        }
+
+        function render() {
+            renderer.render(scene, camera);
+        }
+
+        function startAnimation() {
+            if (animId === null) {
+                animId = requestAnimationFrame(animate);
+            }
         }
 
         function animate() {
-            requestAnimationFrame(animate);
-            // Atualiza controles (importante para o damping)
+            const needsUpdate = controls.update();
+            render();
+            if (needsUpdate) {
+                animId = requestAnimationFrame(animate);
+            } else {
+                animId = null;
+            }
+        }
+
+        function resetCamera() {
+            camera.position.set(0, 0, defaultCameraZ);
+            controls.target.set(0, 0, 0);
             controls.update();
-            renderer.render(scene, camera);
+            render();
         }
     </script>
 </body>
