@@ -371,6 +371,9 @@
     <!-- Drag and drop indicator -->
     <div id="drag-overlay"><span>Solte o arquivo (.las, .laz, .pcd, .ply, .obj, .fbx, .glb, .c4d) aqui</span></div>
     
+    <!-- Elemento para etiqueta de medição da régua -->
+    <div id="ruler-label" style="position: absolute; background: rgba(239, 68, 68, 0.95); color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; pointer-events: none; display: none; z-index: 150; box-shadow: 0 4px 10px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); transform: translate(-50%, -100%);">0.00 m</div>
+    
     <!-- User Interface -->
     <div id="ui-container">
         <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
@@ -401,13 +404,25 @@
             </div>
 
             <div class="control-row">
-                <label for="use-original-color">Cor Original do Arquivo</label>
-                <input type="checkbox" id="use-original-color" checked>
+                <label for="color-mode">Modo de Cor</label>
+                <select id="color-mode" style="background: #2a2a35; color: white; border: 1px solid rgba(255,255,255,0.1); padding: 5px; border-radius: 4px;">
+                    <option value="original" selected>Cor Original</option>
+                    <option value="elevation">Rampa de Elevação</option>
+                    <option value="custom">Cor Sólida Customizada</option>
+                </select>
             </div>
 
-            <div class="control-row" id="color-picker-row" style="opacity: 0.5;">
+            <div class="control-row" id="color-picker-row" style="opacity: 0.5; display: none;">
                 <label for="custom-color">Cor Customizada</label>
                 <input type="color" id="custom-color" value="#4f46e5" disabled>
+            </div>
+
+            <div class="control-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <label for="enable-ruler" style="font-weight: 600;">Ferramenta de Régua 3D</label>
+                    <input type="checkbox" id="enable-ruler">
+                </div>
+                <button id="clear-ruler-btn" class="btn-primary" style="background: #ef4444; display: none; padding: 6px; font-size: 0.8rem; width: 100%; border: none;">Limpar Medições</button>
             </div>
             
             <div class="control-row">
@@ -534,12 +549,22 @@
         const fileInput = document.getElementById('file-input');
         const pointSizeInput = document.getElementById('point-size');
         const pointSizeVal = document.getElementById('point-size-val');
-        const useOriginalColorInput = document.getElementById('use-original-color');
+        const colorModeSelect = document.getElementById('color-mode');
         const customColorInput = document.getElementById('custom-color');
         const colorPickerRow = document.getElementById('color-picker-row');
         const showGridInput = document.getElementById('show-grid');
         const dragOverlay = document.getElementById('drag-overlay');
         const resetCameraBtn = document.getElementById('reset-camera-btn');
+        const enableRulerInput = document.getElementById('enable-ruler');
+        const clearRulerBtn = document.getElementById('clear-ruler-btn');
+        const rulerLabelEl = document.getElementById('ruler-label');
+
+        // Variáveis de estado para a Régua 3D
+        let rulerActive = false;
+        let rulerPoints = [];
+        let rulerMarkers = [];
+        let rulerLine = null;
+        const raycaster = new THREE.Raycaster();
 
         // Optimizer references
         const optFileInput = document.getElementById('opt-file-input');
@@ -632,11 +657,15 @@
             controls.keyPanSpeed = 15.0; // Velocidade do Pan com Shift + Setas
 
             // Trigger animation on control changes (handles damping and mouse interactions)
-            controls.addEventListener('change', startAnimation);
+            controls.addEventListener('change', () => {
+                startAnimation();
+                updateRulerLabel();
+            });
 
             // Event Listeners
             window.addEventListener('resize', onWindowResize);
             resetCameraBtn.addEventListener('click', resetCamera);
+            renderer.domElement.addEventListener('pointerdown', onPointerDown);
             
             // Teclas customizadas (+ e - para Zoom, Setas para Rotacionar/Pan)
             window.addEventListener('keydown', (e) => {
@@ -727,11 +756,31 @@
             // Listeners da interface
             pointSizeInput.addEventListener('input', updatePointCloudMaterial);
             
-            useOriginalColorInput.addEventListener('change', (e) => {
-                const useOriginal = e.target.checked;
-                customColorInput.disabled = useOriginal;
-                colorPickerRow.style.opacity = useOriginal ? "0.5" : "1";
+            colorModeSelect.addEventListener('change', (e) => {
+                const mode = e.target.value;
+                if (mode === 'custom') {
+                    customColorInput.disabled = false;
+                    colorPickerRow.style.opacity = "1";
+                    colorPickerRow.style.display = "flex";
+                } else {
+                    customColorInput.disabled = true;
+                    colorPickerRow.style.opacity = "0.5";
+                    colorPickerRow.style.display = "none";
+                }
                 updatePointCloudMaterial();
+            });
+
+            enableRulerInput.addEventListener('change', (e) => {
+                rulerActive = e.target.checked;
+                renderer.domElement.style.cursor = rulerActive ? 'crosshair' : 'default';
+                clearRulerBtn.style.display = rulerActive ? 'block' : 'none';
+                if (!rulerActive) {
+                    clearMeasurement();
+                }
+            });
+
+            clearRulerBtn.addEventListener('click', () => {
+                clearMeasurement();
             });
             
             customColorInput.addEventListener('input', updatePointCloudMaterial);
@@ -1488,6 +1537,19 @@
 
                 pointCloud = object; // Pode ser Points, Mesh ou Group
                 
+                // Salvar backup das cores originais nos objetos filhos
+                pointCloud.traverse((child) => {
+                    if (child.geometry) {
+                        const geom = child.geometry;
+                        if (geom.attributes.color) {
+                            geom.userData.originalColors = geom.attributes.color.clone();
+                            geom.userData.hasOriginalColors = true;
+                        } else {
+                            geom.userData.hasOriginalColors = false;
+                        }
+                    }
+                });
+                
                 // Centralizar e ajustar escala usando Box3 (mais robusto para Groups)
                 const boundingBox = new THREE.Box3().setFromObject(pointCloud);
                 const center = new THREE.Vector3();
@@ -1539,31 +1601,97 @@
             }
         }
 
+        function applyElevationColoring(object) {
+            if (!object) return;
+            const boundingBox = new THREE.Box3().setFromObject(object);
+            const minZ = boundingBox.min.z;
+            const maxZ = boundingBox.max.z;
+            const deltaZ = (maxZ - minZ) || 1.0;
+
+            object.traverse((child) => {
+                if (child.geometry && child.geometry.attributes.position) {
+                    const geom = child.geometry;
+                    const posAttr = geom.attributes.position;
+                    const count = posAttr.count;
+                    const colors = new Float32Array(count * 3);
+
+                    for (let i = 0; i < count; i++) {
+                        const z = posAttr.getZ(i);
+                        const t = Math.min(Math.max((z - minZ) / deltaZ, 0), 1);
+
+                        // Rampa de cores Spectral (Azul -> Verde -> Vermelho)
+                        let r = 0, g = 0, b = 0;
+                        if (t < 0.25) {
+                            const ratio = t / 0.25;
+                            b = 1.0; g = ratio;
+                        } else if (t < 0.5) {
+                            const ratio = (t - 0.25) / 0.25;
+                            g = 1.0; b = 1.0 - ratio;
+                        } else if (t < 0.75) {
+                            const ratio = (t - 0.5) / 0.25;
+                            g = 1.0; r = ratio;
+                        } else {
+                            const ratio = (t - 0.75) / 0.25;
+                            r = 1.0; g = 1.0 - ratio;
+                        }
+
+                        colors[i * 3] = r;
+                        colors[i * 3 + 1] = g;
+                        colors[i * 3 + 2] = b;
+                    }
+
+                    geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                    geom.attributes.color.needsUpdate = true;
+                }
+            });
+        }
+
+        function restoreOriginalColors(object) {
+            if (!object) return;
+            object.traverse((child) => {
+                if (child.geometry) {
+                    const geom = child.geometry;
+                    if (geom.userData.hasOriginalColors && geom.userData.originalColors) {
+                        geom.setAttribute('color', geom.userData.originalColors.clone());
+                        geom.attributes.color.needsUpdate = true;
+                    } else {
+                        geom.removeAttribute('color');
+                    }
+                }
+            });
+        }
+
         function updatePointCloudMaterial() {
             if (!pointCloud) return;
 
-            const useOriginal = useOriginalColorInput.checked;
+            const mode = colorModeSelect.value;
             const customColor = customColorInput.value;
             const pointSize = parseFloat(pointSizeInput.value);
             pointSizeVal.textContent = pointSize.toFixed(4);
+
+            if (mode === 'elevation') {
+                applyElevationColoring(pointCloud);
+            } else if (mode === 'original') {
+                restoreOriginalColors(pointCloud);
+            }
 
             pointCloud.traverse((child) => {
                 if (child.material) {
                     const materials = Array.isArray(child.material) ? child.material : [child.material];
                     
                     materials.forEach(material => {
-                        // Se for nuvem de pontos, atualiza o tamanho
                         if (material.size !== undefined) {
                             material.size = pointSize;
                         }
 
-                        // Atualização de cor
-                        if (useOriginal && (child.geometry.hasAttribute('color') || material.map)) {
-                            // Se tem cores de vértice ou textura, mantém original
+                        if (mode === 'original' && (child.geometry.hasAttribute('color') || material.map)) {
                             if (child.geometry.hasAttribute('color')) {
                                 material.vertexColors = true;
                                 material.color.setHex(0xffffff);
                             }
+                        } else if (mode === 'elevation') {
+                            material.vertexColors = true;
+                            material.color.setHex(0xffffff);
                         } else {
                             material.vertexColors = false;
                             material.color.set(customColor);
@@ -1599,11 +1727,145 @@
         function animate() {
             const needsUpdate = controls.update();
             render();
+            updateRulerLabel();
             if (needsUpdate) {
                 animId = requestAnimationFrame(animate);
             } else {
                 animId = null;
             }
+        }
+
+        function onPointerDown(e) {
+            if (!rulerActive || !pointCloud) return;
+
+            // Converter a coordenada do mouse para normalizado (-1 a +1)
+            const rect = renderer.domElement.getBoundingClientRect();
+            const mouse = new THREE.Vector2(
+                ((e.clientX - rect.left) / rect.width) * 2 - 1,
+                -((e.clientY - rect.top) / rect.height) * 2 + 1
+            );
+
+            raycaster.setFromCamera(mouse, camera);
+
+            // Obter dimensões do bounding box para definir o limite dinâmico de proximidade do clique
+            const boundingBox = new THREE.Box3().setFromObject(pointCloud);
+            const size = new THREE.Vector3();
+            boundingBox.getSize(size);
+            const maxDim = Math.max(size.x, size.y, size.z);
+            
+            // Limite de clique baseado no tamanho da nuvem e distância da câmera
+            const distance = camera.position.distanceTo(controls.target);
+            raycaster.params.Points.threshold = Math.max(maxDim * 0.002, distance * 0.008);
+
+            const intersects = raycaster.intersectObject(pointCloud, true);
+
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+                let clickedPoint = intersect.point.clone();
+
+                // Snapping ao vértice exato na geometria
+                if (intersect.index !== undefined && intersect.object.geometry) {
+                    const geom = intersect.object.geometry;
+                    const posAttr = geom.attributes.position;
+                    const index = intersect.index;
+
+                    const localPoint = new THREE.Vector3(
+                        posAttr.getX(index),
+                        posAttr.getY(index),
+                        posAttr.getZ(index)
+                    );
+                    clickedPoint = localPoint.applyMatrix4(intersect.object.matrixWorld);
+                }
+
+                addRulerPoint(clickedPoint, maxDim);
+            }
+        }
+
+        function addRulerPoint(point, maxDim) {
+            if (rulerPoints.length >= 2) {
+                clearMeasurement();
+            }
+
+            rulerPoints.push(point);
+
+            // Marcador visual vermelho
+            const markerSize = maxDim * 0.005 || 0.1;
+            const markerGeo = new THREE.SphereGeometry(markerSize, 16, 16);
+            const markerMat = new THREE.MeshBasicMaterial({ color: 0xff4444, depthTest: false });
+            const marker = new THREE.Mesh(markerGeo, markerMat);
+            marker.position.copy(point);
+            scene.add(marker);
+            rulerMarkers.push(marker);
+
+            if (rulerPoints.length === 2) {
+                const p1 = rulerPoints[0];
+                const p2 = rulerPoints[1];
+
+                // Desenhar a linha conectando os pontos
+                const lineGeo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+                const lineMat = new THREE.LineBasicMaterial({ color: 0xff4444, linewidth: 3, depthTest: false });
+                rulerLine = new THREE.Line(lineGeo, lineMat);
+                scene.add(rulerLine);
+
+                // Calcular a distância 3D
+                const distance = p1.distanceTo(p2);
+                
+                rulerLabelEl.textContent = `${distance.toFixed(3)} m`;
+                rulerLabelEl.style.display = 'block';
+                updateRulerLabel();
+            } else {
+                rulerLabelEl.style.display = 'none';
+            }
+
+            render();
+        }
+
+        function updateRulerLabel() {
+            if (rulerPoints.length !== 2 || !rulerLabelEl || rulerLabelEl.style.display === 'none') {
+                return;
+            }
+
+            const p1 = rulerPoints[0];
+            const p2 = rulerPoints[1];
+            const midPoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+
+            const tempV = midPoint.clone().project(camera);
+
+            if (tempV.z > 1) {
+                rulerLabelEl.style.display = 'none';
+                return;
+            } else {
+                rulerLabelEl.style.display = 'block';
+            }
+
+            const x = (tempV.x * 0.5 + 0.5) * window.innerWidth;
+            const y = (tempV.y * -0.5 + 0.5) * window.innerHeight;
+
+            rulerLabelEl.style.left = `${x}px`;
+            rulerLabelEl.style.top = `${y}px`;
+        }
+
+        function clearMeasurement() {
+            rulerPoints = [];
+            rulerMarkers.forEach(marker => {
+                scene.remove(marker);
+                if (marker.geometry) marker.geometry.dispose();
+                if (marker.material) marker.material.dispose();
+            });
+            rulerMarkers = [];
+
+            if (rulerLine) {
+                scene.remove(rulerLine);
+                if (rulerLine.geometry) rulerLine.geometry.dispose();
+                if (rulerLine.material) rulerLine.material.dispose();
+                rulerLine = null;
+            }
+
+            if (rulerLabelEl) {
+                rulerLabelEl.style.display = 'none';
+            }
+
+            render();
         }
 
         function resetCamera() {
