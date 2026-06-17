@@ -449,6 +449,51 @@
             -webkit-backdrop-filter: none !important;
             background: rgba(15, 15, 18, 0.96) !important;
         }
+
+        /* Toasts e Spinners */
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+        .toast {
+            background: rgba(20, 20, 25, 0.95);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.1);
+            font-size: 0.9rem;
+            animation: toast-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .toast.error { border-left: 4px solid #ef4444; }
+        .toast.success { border-left: 4px solid #10b981; }
+        .toast.info { border-left: 4px solid #4f46e5; }
+        .toast.fade-out { animation: toast-out 0.3s ease-in forwards; }
+        @keyframes toast-in { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes toast-out { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-20px); } }
+
+        .spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
     <!-- Import map for Three.js e Addons -->
     <script type="importmap">
@@ -465,6 +510,16 @@
     </script>
 </head>
 <body>
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+    
+    <!-- Empty State -->
+    <div id="empty-state" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 5; pointer-events: none; opacity: 0.8; transition: opacity 0.3s;">
+        <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 15px; color: #4f46e5;"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+        <h2 style="font-size: 1.5rem; margin: 0 0 10px 0; font-weight: 500; color: #fff;">Nenhum modelo carregado</h2>
+        <p style="font-size: 0.9rem; color: #aaa; margin: 0;">Arraste e solte seu arquivo 3D aqui</p>
+    </div>
+
     <!-- Drag and drop indicator -->
     <div id="drag-overlay"><span>Solte o arquivo (.las, .laz, .pcd, .ply, .obj, .fbx, .glb, .c4d) aqui</span></div>
     
@@ -474,11 +529,19 @@
     <!-- Retângulo de seleção 2D -->
     <div id="selection-box" style="position: absolute; border: 1.5px dashed #10b981; background: rgba(16, 185, 129, 0.15); pointer-events: none; display: none; z-index: 200; border-radius: 4px;"></div>
     
+    <!-- Botão de mostrar menu (quando oculto) -->
+    <div id="show-ui-btn" style="position: absolute; top: 20px; left: 20px; z-index: 100; background: rgba(20,20,25,0.85); padding: 10px; border-radius: 8px; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); display: none; color: white; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,0.3); backdrop-filter: blur(10px);">
+        ☰ Menu
+    </div>
+
     <!-- User Interface -->
     <div id="ui-container">
-        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
-            <img src="https://pixforce.com/wp-content/uploads/2023/11/Logotipo-PixForce-02-512x256px.png" alt="Pix Force Logo" style="height: 40px; width: auto;">
-            <h1 style="margin: 0;">Visualizador 3D Pix Force</h1>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <img src="https://pixforce.com/wp-content/uploads/2023/11/Logotipo-PixForce-02-512x256px.png" alt="Pix Force Logo" style="height: 40px; width: auto;">
+                <h1 style="margin: 0; font-size: 1.1rem;">Visualizador 3D</h1>
+            </div>
+            <button id="hide-ui-btn" style="background: none; border: none; color: #aaa; cursor: pointer; font-size: 1.2rem; transition: color 0.2s;" title="Ocultar Menu">✖</button>
         </div>
         
         <div class="tab-container">
@@ -934,7 +997,27 @@
                 updateRulerLabel();
             });
 
+            // Adaptive LOD: Downgrade visual durante o movimento para manter fluidez
+            controls.addEventListener('start', () => {
+                if (pointCloud || isLowSpec) {
+                    renderer.setPixelRatio(isLowSpec ? 0.5 : 1.0);
+                }
+            });
+            controls.addEventListener('end', () => {
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, isLowSpec ? 1.0 : 1.5));
+                render(); // Força renderização em alta qualidade ao parar
+            });
+
             // Event Listeners
+            document.getElementById('hide-ui-btn').addEventListener('click', () => {
+                document.getElementById('ui-container').style.display = 'none';
+                document.getElementById('show-ui-btn').style.display = 'block';
+            });
+            document.getElementById('show-ui-btn').addEventListener('click', () => {
+                document.getElementById('ui-container').style.display = 'flex';
+                document.getElementById('show-ui-btn').style.display = 'none';
+            });
+            
             window.addEventListener('resize', onWindowResize);
             resetCameraBtn.addEventListener('click', resetCamera);
             renderer.domElement.addEventListener('pointerdown', onPointerDown);
@@ -1386,6 +1469,7 @@
                     a.download = `screenshot_${Date.now()}.png`;
                     a.click();
                     URL.revokeObjectURL(url);
+                    showToast('Captura salva com sucesso!', 'success');
                 }
             }, 'image/png');
         }
@@ -1852,8 +1936,30 @@
         }
 
         function updateStatus(text, color = "#aaa") {
-            statusEl.textContent = text;
+            const emptyState = document.getElementById('empty-state');
+            if (emptyState) {
+                emptyState.style.opacity = text === "Aguardando arquivo..." ? '0.8' : '0';
+            }
+            const isLoading = text.toLowerCase().includes("processando") || text.toLowerCase().includes("carregando") || text.toLowerCase().includes("aguardando") || text.toLowerCase().includes("baixando");
+            if (isLoading && text !== "Aguardando arquivo...") {
+                statusEl.innerHTML = `<div class="spinner"></div>${text}`;
+            } else {
+                statusEl.innerHTML = text;
+            }
             statusEl.style.color = color;
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = message;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.classList.add('fade-out');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
         }
 
         function disposeObject(obj) {
