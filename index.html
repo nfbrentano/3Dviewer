@@ -301,6 +301,102 @@
             display: flex;
         }
 
+        /* Screenshot Button Styles */
+        #screenshot-btn {
+            width: 45px;
+            height: 45px;
+            background: #10b981; /* Verde esmeralda premium */
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            font-size: 1.2rem;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            border: 2px solid rgba(255,255,255,0.1);
+        }
+
+        #screenshot-btn:hover {
+            transform: scale(1.1);
+            background: #34d399;
+            box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4);
+        }
+
+        #screenshot-card {
+            background: rgba(20, 20, 25, 0.9);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 20px;
+            width: 220px;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+            display: none;
+            flex-direction: column;
+            gap: 12px;
+            animation: slideUp 0.3s ease-out;
+        }
+
+        #screenshot-card.active {
+            display: flex;
+        }
+
+        /* ViewCube Styles */
+        #viewcube-container {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            width: 80px;
+            height: 80px;
+            perspective: 300px;
+            z-index: 100;
+        }
+
+        #viewcube {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            transform-style: preserve-3d;
+            transform: rotateX(0deg) rotateY(0deg);
+        }
+
+        .cube-face {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            text-align: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #ddd;
+            background: rgba(20, 20, 25, 0.85);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            user-select: none;
+            cursor: pointer;
+            box-sizing: border-box;
+            backface-visibility: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .cube-face:hover {
+            background: #4f46e5;
+            color: white;
+            border-color: #6366f1;
+            box-shadow: 0 0 10px rgba(79, 70, 229, 0.6);
+        }
+
+        /* 3D Face Positions */
+        .cube-front  { transform: rotateY(  0deg) translateZ(30px); }
+        .cube-back   { transform: rotateY(180deg) translateZ(30px); }
+        .cube-left   { transform: rotateY(-90deg) translateZ(30px); }
+        .cube-right  { transform: rotateY( 90deg) translateZ(30px); }
+        .cube-top    { transform: rotateX( 90deg) translateZ(30px); }
+        .cube-bottom { transform: rotateX(-90deg) translateZ(30px); }
+
         @keyframes slideUp {
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
@@ -347,7 +443,8 @@
 
         /* Fallbacks de performance para hardware de baixa especificação */
         body.low-spec #ui-container,
-        body.low-spec #help-card {
+        body.low-spec #help-card,
+        body.low-spec #screenshot-card {
             backdrop-filter: none !important;
             -webkit-backdrop-filter: none !important;
             background: rgba(15, 15, 18, 0.96) !important;
@@ -373,6 +470,9 @@
     
     <!-- Elemento para etiqueta de medição da régua -->
     <div id="ruler-label" style="position: absolute; background: rgba(239, 68, 68, 0.95); color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; pointer-events: none; display: none; z-index: 150; box-shadow: 0 4px 10px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); transform: translate(-50%, -100%);">0.00 m</div>
+    
+    <!-- Retângulo de seleção 2D -->
+    <div id="selection-box" style="position: absolute; border: 1.5px dashed #10b981; background: rgba(16, 185, 129, 0.15); pointer-events: none; display: none; z-index: 200; border-radius: 4px;"></div>
     
     <!-- User Interface -->
     <div id="ui-container">
@@ -407,9 +507,23 @@
                 <label for="color-mode">Modo de Cor</label>
                 <select id="color-mode" style="background: #2a2a35; color: white; border: 1px solid rgba(255,255,255,0.1); padding: 5px; border-radius: 4px;">
                     <option value="original" selected>Cor Original</option>
-                    <option value="elevation">Rampa de Elevação</option>
+                    <option value="spectral">Spectral (Elevação)</option>
+                    <option value="viridis">Viridis</option>
+                    <option value="plasma">Plasma</option>
+                    <option value="magma">Magma</option>
+                    <option value="turbo">Turbo</option>
+                    <option value="temperature">Temperatura</option>
                     <option value="custom">Cor Sólida Customizada</option>
                 </select>
+            </div>
+
+            <!-- Legenda do Colormap -->
+            <div class="control-row" id="colormap-legend-row" style="display: none; flex-direction: column; gap: 5px; background: rgba(0, 0, 0, 0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.05); align-items: stretch;">
+                <div id="colormap-legend-bar" style="height: 12px; width: 100%; border-radius: 4px;"></div>
+                <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: #aaa; width: 100%;">
+                    <span id="legend-min-val">- m</span>
+                    <span id="legend-max-val">- m</span>
+                </div>
             </div>
 
             <div class="control-row" id="color-picker-row" style="opacity: 0.5; display: none;">
@@ -431,6 +545,122 @@
             </div>
             
             <button id="reset-camera-btn" class="btn-primary" style="margin-top: 5px; background: #3730a3;">Resetar Câmera</button>
+
+            <div class="control-row">
+                <label for="bg-theme">Tema de Fundo</label>
+                <select id="bg-theme" style="background: #2a2a35; color: white; border: 1px solid rgba(255,255,255,0.1); padding: 5px; border-radius: 4px;">
+                    <option value="dark" selected>Escuro</option>
+                    <option value="light">Claro</option>
+                    <option value="darkblue">Azul Escuro</option>
+                    <option value="neutral">Cinza Neutro</option>
+                </select>
+            </div>
+
+            <div class="control-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <label for="enable-turntable" style="font-weight: 600;">Rotação Automática</label>
+                    <input type="checkbox" id="enable-turntable">
+                </div>
+                <div id="turntable-speed-row" style="display: none; justify-content: space-between; align-items: center; width: 100%;">
+                    <label for="turntable-speed" style="font-size: 0.8rem;">Velocidade (RPM)</label>
+                    <input type="range" id="turntable-speed" min="0.1" max="10" step="0.1" value="2" style="width: 120px;">
+                </div>
+            </div>
+
+            <!-- Plano de Corte (Clipping Plane) -->
+            <div class="control-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <label for="enable-clipping" style="font-weight: 600;">Plano de Corte (Clipping)</label>
+                    <input type="checkbox" id="enable-clipping">
+                </div>
+                
+                <div id="clipping-controls" style="display: none; flex-direction: column; gap: 8px; width: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <label for="clipping-axis" style="font-size: 0.8rem;">Eixo de Corte</label>
+                        <select id="clipping-axis" style="background: #2a2a35; color: white; border: 1px solid rgba(255,255,255,0.1); padding: 4px; border-radius: 4px; font-size: 0.8rem;">
+                            <option value="X">X (Lateral)</option>
+                            <option value="Y">Y (Vertical)</option>
+                            <option value="Z" selected>Z (Profundidade)</option>
+                        </select>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
+                        <div style="display: flex; justify-content: space-between; width: 100%;">
+                            <label for="clipping-offset" style="font-size: 0.8rem;">Posição</label>
+                            <span id="clipping-offset-val" style="font-size: 0.8rem; color: #aaa;">0.00</span>
+                        </div>
+                        <input type="range" id="clipping-offset" min="-1" max="1" step="0.01" value="0" style="width: 100%;">
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <label for="clipping-invert" style="font-size: 0.8rem;">Inverter Direção</label>
+                        <input type="checkbox" id="clipping-invert">
+                    </div>
+
+                    <div style="font-size: 0.7rem; color: #10b981; margin-top: 4px; padding: 6px; background: rgba(16,185,129,0.1); border-radius: 4px; border: 1px solid rgba(16,185,129,0.2); line-height: 1.2;">
+                        ℹ️ <strong>Formatos compatíveis:</strong> Todos (.las, .laz, .ply, .pcd, .obj, .glb, .fbx, .3ds).
+                    </div>
+                </div>
+            </div>
+
+            <!-- Seleção de Região (Box Select) -->
+            <div class="control-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <label for="enable-selection" style="font-weight: 600;">Seleção de Região</label>
+                    <input type="checkbox" id="enable-selection">
+                </div>
+                
+                <div id="selection-controls" style="display: none; flex-direction: column; gap: 8px; width: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <span>Selecionados:</span>
+                        <span id="selection-count-val" style="font-family: monospace; font-weight: 600; color: #10b981;">0 pontos</span>
+                    </div>
+                    <button id="clear-selection-btn" class="btn-primary" style="background: #ef4444; padding: 6px; font-size: 0.8rem; width: 100%; border: none;">Limpar Seleção</button>
+                    
+                    <div style="font-size: 0.7rem; color: #10b981; padding: 6px; background: rgba(16,185,129,0.1); border-radius: 4px; border: 1px solid rgba(16,185,129,0.2); line-height: 1.2;">
+                        ℹ️ <strong>Uso:</strong> Arraste o mouse com botão esquerdo pressionado para selecionar.<br>
+                        <strong>Formatos compatíveis:</strong> Nuvem de Pontos (.las, .laz, .ply, .pcd).
+                    </div>
+                </div>
+            </div>
+
+            <!-- Painel de Estatísticas -->
+            <details id="stats-panel" style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 10px; margin-top: 10px;">
+                <summary style="cursor: pointer; font-size: 0.85rem; font-weight: 600; color: #ddd; outline: none; list-style: none; display: flex; justify-content: space-between; align-items: center;">
+                    <span>📊 Estatísticas</span>
+                    <span style="font-size: 0.7rem; color: #888;">▼</span>
+                </summary>
+                <div id="stats-content" style="margin-top: 8px; font-size: 0.8rem; color: #bbb; display: flex; flex-direction: column; gap: 6px;">
+                    <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
+                        <span>Formato:</span>
+                        <span id="stat-format" style="font-family: monospace; color: #fff;">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
+                        <span>Nº de Pontos:</span>
+                        <span id="stat-points" style="font-family: monospace; color: #fff;">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
+                        <span>Nº de Faces:</span>
+                        <span id="stat-faces" style="font-family: monospace; color: #fff;">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
+                        <span>Tamanho:</span>
+                        <span id="stat-size" style="font-family: monospace; color: #fff;">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
+                        <span>Cores Originais:</span>
+                        <span id="stat-colors" style="font-family: monospace; color: #fff;">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
+                        <span>Dimensões:</span>
+                        <span id="stat-dims" style="font-family: monospace; color: #fff; text-align: right; max-width: 60%; word-break: break-all;">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>Tempo de Parse:</span>
+                        <span id="stat-time" style="font-family: monospace; color: #fff;">-</span>
+                    </div>
+                </div>
+            </details>
         </div>
 
         <!-- Optimizer Tab -->
@@ -482,11 +712,35 @@
         </div>
     </div>
 
+    <!-- Cubo de Orientação (ViewCube) -->
+    <div id="viewcube-container">
+        <div id="viewcube">
+            <div class="cube-face cube-front" onclick="alignCamera('front')">FRENTE</div>
+            <div class="cube-face cube-back" onclick="alignCamera('back')">TRÁS</div>
+            <div class="cube-face cube-left" onclick="alignCamera('left')">ESQ</div>
+            <div class="cube-face cube-right" onclick="alignCamera('right')">DIR</div>
+            <div class="cube-face cube-top" onclick="alignCamera('top')">TOPO</div>
+            <div class="cube-face cube-bottom" onclick="alignCamera('bottom')">BASE</div>
+        </div>
+    </div>
+
     <!-- 3D Canvas -->
     <div id="canvas-container"></div>
 
     <!-- Help Tooltip -->
     <div id="help-container">
+        <!-- Card de Screenshot -->
+        <div id="screenshot-card">
+            <h3 style="margin: 0; font-size: 0.9rem; color: #10b981; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;">Capturar Tela</h3>
+            <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; background: rgba(255, 255, 255, 0.03); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                <label for="screenshot-alpha" style="color: #ddd; cursor: pointer;">Fundo Transparente</label>
+                <input type="checkbox" id="screenshot-alpha" style="cursor: pointer;">
+            </div>
+            <button id="screenshot-capture-btn" class="btn-primary" style="background: #10b981; padding: 8px; font-size: 0.85rem; width: 100%;">Capturar PNG</button>
+        </div>
+        <!-- Botão Screenshot -->
+        <div id="screenshot-btn" title="Capturar Tela">📸</div>
+
         <div id="help-card">
             <div class="help-section">
                 <h3>Mouse</h3>
@@ -541,8 +795,23 @@
         let scene, camera, renderer, controls;
         let pointCloud;
         let gridHelper, axesHelper;
+        let localPlane = null;
+        let planeHelper = null;
         let defaultCameraZ = 5;
         let animId = null;
+
+        // Variáveis de animação para transições de câmera (ViewCube)
+        let cameraTargetPos = null;
+        let cameraTargetUp = null;
+        let cameraAnimDuration = 400;
+        let cameraAnimStartTime = 0;
+        const cameraStartPos = new THREE.Vector3();
+        const cameraStartUp = new THREE.Vector3();
+
+        // Variáveis de estado para a Seleção de Região
+        let selectionActive = false;
+        let isSelecting = false;
+        let selectStartPos = { x: 0, y: 0 };
 
         // Referências do DOM
         const statusEl = document.getElementById('status');
@@ -641,10 +910,13 @@
             // Renderizador
             renderer = new THREE.WebGLRenderer({ 
                 antialias: !isLowSpec,
-                powerPreference: 'high-performance'
+                powerPreference: 'high-performance',
+                alpha: true,
+                preserveDrawingBuffer: true
             });
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, isLowSpec ? 1.0 : 1.5));
             renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.localClippingEnabled = true;
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
             // Controles de câmera (Navegação)
@@ -710,17 +982,41 @@
             const helpBtn = document.getElementById('help-btn');
             const helpCard = document.getElementById('help-card');
             
-            helpBtn.addEventListener('mouseenter', () => helpCard.classList.add('active'));
+            helpBtn.addEventListener('mouseenter', () => {
+                screenshotCard.classList.remove('active');
+                helpCard.classList.add('active');
+            });
             helpBtn.addEventListener('mouseleave', () => helpCard.classList.remove('active'));
             
             // Toggle para mobile (clique)
             helpBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                screenshotCard.classList.remove('active');
                 helpCard.classList.toggle('active');
             });
             
-            document.addEventListener('click', () => helpCard.classList.remove('active'));
+            document.addEventListener('click', () => {
+                helpCard.classList.remove('active');
+                screenshotCard.classList.remove('active');
+            });
             helpCard.addEventListener('click', (e) => e.stopPropagation());
+
+            // Lógica do Tooltip de Screenshot
+            const screenshotBtn = document.getElementById('screenshot-btn');
+            const screenshotCard = document.getElementById('screenshot-card');
+            const screenshotCaptureBtn = document.getElementById('screenshot-capture-btn');
+
+            screenshotBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                helpCard.classList.remove('active');
+                screenshotCard.classList.toggle('active');
+            });
+            screenshotCard.addEventListener('click', (e) => e.stopPropagation());
+
+            screenshotCaptureBtn.addEventListener('click', () => {
+                captureScreenshot();
+                screenshotCard.classList.remove('active');
+            });
 
             // Tratamento de input de arquivo
             fileInput.addEventListener('change', (e) => {
@@ -774,7 +1070,14 @@
                 rulerActive = e.target.checked;
                 renderer.domElement.style.cursor = rulerActive ? 'crosshair' : 'default';
                 clearRulerBtn.style.display = rulerActive ? 'block' : 'none';
-                if (!rulerActive) {
+                if (rulerActive) {
+                    // Desativar Seleção de Região se ativo
+                    const enableSelectionInput = document.getElementById('enable-selection');
+                    const selectionControls = document.getElementById('selection-controls');
+                    if (enableSelectionInput) enableSelectionInput.checked = false;
+                    selectionActive = false;
+                    if (selectionControls) selectionControls.style.display = 'none';
+                } else {
                     clearMeasurement();
                 }
             });
@@ -788,6 +1091,147 @@
             showGridInput.addEventListener('change', (e) => {
                 gridHelper.visible = e.target.checked;
                 axesHelper.visible = e.target.checked;
+                render();
+            });
+
+            // Tema de Fundo
+            const bgThemeSelect = document.getElementById('bg-theme');
+            bgThemeSelect.addEventListener('change', updateBgTheme);
+            
+            // Carregar tema salvo se existir
+            const savedTheme = localStorage.getItem('3dviewer_theme');
+            if (savedTheme) {
+                bgThemeSelect.value = savedTheme;
+                // Executar update após a inicialização da cena estar completa
+                setTimeout(updateBgTheme, 0);
+            }
+
+            // Rotação Automática (Turntable)
+            const enableTurntableInput = document.getElementById('enable-turntable');
+            const turntableSpeedInput = document.getElementById('turntable-speed');
+            const turntableSpeedRow = document.getElementById('turntable-speed-row');
+
+            enableTurntableInput.addEventListener('change', (e) => {
+                const enabled = e.target.checked;
+                turntableSpeedRow.style.display = enabled ? 'flex' : 'none';
+                controls.autoRotate = enabled;
+                if (enabled) {
+                    controls.autoRotateSpeed = parseFloat(turntableSpeedInput.value);
+                    startAnimation();
+                }
+            });
+
+            turntableSpeedInput.addEventListener('input', (e) => {
+                controls.autoRotateSpeed = parseFloat(e.target.value);
+            });
+
+            // Plano de Corte (Clipping)
+            const enableClippingInput = document.getElementById('enable-clipping');
+            const clippingControls = document.getElementById('clipping-controls');
+            const clippingAxisSelect = document.getElementById('clipping-axis');
+            const clippingOffsetInput = document.getElementById('clipping-offset');
+            const clippingOffsetVal = document.getElementById('clipping-offset-val');
+            const clippingInvertInput = document.getElementById('clipping-invert');
+
+            window.updateClipping = function() {
+                const enabled = enableClippingInput.checked;
+                clippingControls.style.display = enabled ? 'flex' : 'none';
+
+                if (!pointCloud) {
+                    if (planeHelper) {
+                        scene.remove(planeHelper);
+                        planeHelper = null;
+                    }
+                    return;
+                }
+
+                const boundingBox = new THREE.Box3().setFromObject(pointCloud);
+                const size = new THREE.Vector3();
+                boundingBox.getSize(size);
+                const maxDim = Math.max(size.x, size.y, size.z);
+
+                const axis = clippingAxisSelect.value;
+                const offsetPercent = parseFloat(clippingOffsetInput.value); // -1 a 1
+                clippingOffsetVal.textContent = offsetPercent.toFixed(2);
+                
+                const invert = clippingInvertInput.checked ? -1 : 1;
+
+                let normal = new THREE.Vector3();
+                let actualOffset = 0;
+
+                if (axis === 'X') {
+                    normal.set(invert, 0, 0);
+                    actualOffset = offsetPercent * (size.x / 2);
+                } else if (axis === 'Y') {
+                    normal.set(0, invert, 0);
+                    actualOffset = offsetPercent * (size.y / 2);
+                } else if (axis === 'Z') {
+                    normal.set(0, 0, invert);
+                    actualOffset = offsetPercent * (size.z / 2);
+                }
+
+                if (!localPlane) {
+                    localPlane = new THREE.Plane();
+                }
+                localPlane.set(normal, -actualOffset);
+
+                pointCloud.traverse((child) => {
+                    if (child.material) {
+                        const materials = Array.isArray(child.material) ? child.material : [child.material];
+                        materials.forEach(material => {
+                            if (enabled) {
+                                material.clippingPlanes = [localPlane];
+                            } else {
+                                // Garantir array vazio se desativado
+                                material.clippingPlanes = [];
+                            }
+                            material.needsUpdate = true;
+                        });
+                    }
+                });
+
+                if (planeHelper) {
+                    scene.remove(planeHelper);
+                    planeHelper = null;
+                }
+
+                if (enabled && maxDim > 0) {
+                    planeHelper = new THREE.PlaneHelper(localPlane, maxDim * 1.2, 0xff4444);
+                    scene.add(planeHelper);
+                }
+
+                render();
+            };
+
+            enableClippingInput.addEventListener('change', window.updateClipping);
+            clippingAxisSelect.addEventListener('change', window.updateClipping);
+            clippingOffsetInput.addEventListener('input', window.updateClipping);
+            clippingInvertInput.addEventListener('change', window.updateClipping);
+
+            // Seleção de Região (Box Select)
+            const enableSelectionInput = document.getElementById('enable-selection');
+            const selectionControls = document.getElementById('selection-controls');
+            const clearSelectionBtn = document.getElementById('clear-selection-btn');
+
+            enableSelectionInput.addEventListener('change', (e) => {
+                selectionActive = e.target.checked;
+                selectionControls.style.display = selectionActive ? 'flex' : 'none';
+                
+                if (selectionActive) {
+                    // Desativar ferramenta de Régua se ativa
+                    enableRulerInput.checked = false;
+                    rulerActive = false;
+                    clearRulerBtn.style.display = 'none';
+                    clearMeasurement();
+                    renderer.domElement.style.cursor = 'crosshair';
+                } else {
+                    renderer.domElement.style.cursor = 'default';
+                }
+            });
+
+            clearSelectionBtn.addEventListener('click', () => {
+                restoreOriginalColors(pointCloud);
+                document.getElementById('selection-count-val').textContent = "0 pontos";
                 render();
             });
 
@@ -870,6 +1314,135 @@
             a.download = fileName;
             a.click();
             URL.revokeObjectURL(url);
+        }
+
+        function updateStats(file, parseTimeMs, object) {
+            const ext = file.name.toLowerCase().split('.').pop().toUpperCase();
+            document.getElementById('stat-format').textContent = ext;
+
+            let sizeStr = "-";
+            if (file.size > 1024 * 1024 * 1024) {
+                sizeStr = (file.size / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+            } else if (file.size > 1024 * 1024) {
+                sizeStr = (file.size / (1024 * 1024)).toFixed(2) + " MB";
+            } else {
+                sizeStr = (file.size / 1024).toFixed(2) + " KB";
+            }
+            document.getElementById('stat-size').textContent = sizeStr;
+
+            let totalPoints = 0;
+            let totalFaces = 0;
+            let hasColors = "Não";
+
+            if (object) {
+                object.traverse((child) => {
+                    if (child.geometry && child.geometry.attributes.position) {
+                        totalPoints += child.geometry.attributes.position.count;
+                    }
+                    if (child.isMesh && child.geometry.index) {
+                        totalFaces += child.geometry.index.count / 3;
+                    } else if (child.isMesh && child.geometry.attributes.position && !child.geometry.index) {
+                        totalFaces += child.geometry.attributes.position.count / 3;
+                    }
+                    if (child.geometry && (child.geometry.userData.hasOriginalColors || child.geometry.attributes.color)) {
+                        hasColors = "Sim";
+                    }
+                });
+            }
+
+            document.getElementById('stat-points').textContent = totalPoints.toLocaleString();
+            document.getElementById('stat-faces').textContent = totalFaces > 0 ? totalFaces.toLocaleString() : "-";
+            document.getElementById('stat-colors').textContent = hasColors;
+            document.getElementById('stat-time').textContent = parseTimeMs ? `${parseTimeMs.toFixed(0)} ms` : "-";
+
+            if (object) {
+                const boundingBox = new THREE.Box3().setFromObject(object);
+                const size = new THREE.Vector3();
+                boundingBox.getSize(size);
+                document.getElementById('stat-dims').textContent = `${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)} m`;
+            } else {
+                document.getElementById('stat-dims').textContent = "-";
+            }
+        }
+
+        function captureScreenshot() {
+            const useAlpha = document.getElementById('screenshot-alpha').checked;
+            const originalBg = scene.background;
+            
+            if (useAlpha) {
+                scene.background = null;
+            }
+            
+            renderer.render(scene, camera);
+            
+            renderer.domElement.toBlob((blob) => {
+                scene.background = originalBg;
+                renderer.render(scene, camera);
+                
+                if (blob) {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `screenshot_${Date.now()}.png`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                }
+            }, 'image/png');
+        }
+
+        function updateBgTheme() {
+            const theme = document.getElementById('bg-theme').value;
+            localStorage.setItem('3dviewer_theme', theme);
+            
+            if (scene.background && scene.background.dispose) {
+                scene.background.dispose();
+            }
+
+            let bgColor;
+            let gridColorCenter = 0x555555;
+            let gridColorGrid = 0x222222;
+
+            if (theme === 'dark') {
+                bgColor = new THREE.Color(0x111111);
+                gridColorCenter = 0x555555;
+                gridColorGrid = 0x222222;
+            } else if (theme === 'light') {
+                bgColor = new THREE.Color(0xf0f0f0);
+                gridColorCenter = 0x999999;
+                gridColorGrid = 0xdddddd;
+            } else if (theme === 'neutral') {
+                bgColor = new THREE.Color(0x2d2d2d);
+                gridColorCenter = 0x666666;
+                gridColorGrid = 0x3d3d3d;
+            } else if (theme === 'darkblue') {
+                const canvas = document.createElement('canvas');
+                canvas.width = 2;
+                canvas.height = 512;
+                const ctx = canvas.getContext('2d');
+                const gradient = ctx.createLinearGradient(0, 0, 0, 512);
+                gradient.addColorStop(0, '#0a0a2e');
+                gradient.addColorStop(1, '#1a1a4e');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, 2, 512);
+
+                const texture = new THREE.CanvasTexture(canvas);
+                bgColor = texture;
+                gridColorCenter = 0x8888ff;
+                gridColorGrid = 0x333388;
+            }
+
+            scene.background = bgColor;
+
+            if (gridHelper) {
+                scene.remove(gridHelper);
+                gridHelper.geometry.dispose();
+                gridHelper.material.dispose();
+            }
+            gridHelper = new THREE.GridHelper(20, 20, gridColorCenter, gridColorGrid);
+            gridHelper.visible = document.getElementById('show-grid').checked;
+            scene.add(gridHelper);
+
+            render();
         }
 
         async function startOptimization() {
@@ -1314,6 +1887,7 @@
                 return;
             }
 
+            const loadStartTime = performance.now();
             updateStatus("Lendo arquivo local...", "#ffd166");
 
             try {
@@ -1595,18 +2169,108 @@
                 });
                 const pointCountStr = totalPoints > 0 ? ` (${totalPoints.toLocaleString()} pontos)` : '';
                 updateStatus(`Arquivo ${fileName.split('.').pop().toUpperCase()} carregado${pointCountStr}`, "#06d6a0");
+                const loadDuration = performance.now() - loadStartTime;
+                updateStats(file, loadDuration, pointCloud);
             } catch (error) {
                 console.error("Erro no processamento do arquivo:", error);
                 updateStatus("Erro ao abrir o arquivo.", "#ff6b6b");
             }
         }
 
+        const COLORMAPS = {
+            spectral: [
+                { t: 0.00, color: [0.0, 0.0, 1.0] },
+                { t: 0.25, color: [0.0, 1.0, 1.0] },
+                { t: 0.50, color: [0.0, 1.0, 0.0] },
+                { t: 0.75, color: [1.0, 1.0, 0.0] },
+                { t: 1.00, color: [1.0, 0.0, 0.0] }
+            ],
+            viridis: [
+                { t: 0.00, color: [0.267, 0.004, 0.329] },
+                { t: 0.25, color: [0.231, 0.322, 0.545] },
+                { t: 0.50, color: [0.128, 0.565, 0.551] },
+                { t: 0.75, color: [0.369, 0.788, 0.384] },
+                { t: 1.00, color: [0.992, 0.906, 0.144] }
+            ],
+            plasma: [
+                { t: 0.00, color: [0.051, 0.024, 0.529] },
+                { t: 0.25, color: [0.416, 0.043, 0.655] },
+                { t: 0.50, color: [0.725, 0.192, 0.506] },
+                { t: 0.75, color: [0.933, 0.467, 0.278] },
+                { t: 1.00, color: [0.941, 0.894, 0.259] }
+            ],
+            magma: [
+                { t: 0.00, color: [0.000, 0.000, 0.016] },
+                { t: 0.20, color: [0.071, 0.063, 0.208] },
+                { t: 0.40, color: [0.318, 0.075, 0.490] },
+                { t: 0.60, color: [0.635, 0.149, 0.471] },
+                { t: 0.80, color: [0.957, 0.435, 0.220] },
+                { t: 1.00, color: [0.988, 0.906, 0.722] }
+            ],
+            turbo: [
+                { t: 0.00, color: [0.190, 0.072, 0.232] },
+                { t: 0.15, color: [0.170, 0.384, 0.949] },
+                { t: 0.35, color: [0.106, 0.824, 0.835] },
+                { t: 0.55, color: [0.455, 0.976, 0.337] },
+                { t: 0.75, color: [0.949, 0.824, 0.106] },
+                { t: 0.90, color: [0.996, 0.384, 0.157] },
+                { t: 1.00, color: [0.550, 0.063, 0.000] }
+            ],
+            temperature: [
+                { t: 0.00, color: [0.0, 0.0, 1.0] },
+                { t: 0.50, color: [1.0, 1.0, 1.0] },
+                { t: 1.00, color: [1.0, 0.0, 0.0] }
+            ]
+        };
+
+        function interpolateColor(t, stops) {
+            if (t <= 0) return stops[0].color;
+            if (t >= 1) return stops[stops.length - 1].color;
+            let i = 0;
+            while (i < stops.length - 1 && t > stops[i + 1].t) {
+                i++;
+            }
+            const stop1 = stops[i];
+            const stop2 = stops[i + 1];
+            const factor = (t - stop1.t) / (stop2.t - stop1.t);
+            return [
+                stop1.color[0] + factor * (stop2.color[0] - stop1.color[0]),
+                stop1.color[1] + factor * (stop2.color[1] - stop1.color[1]),
+                stop1.color[2] + factor * (stop2.color[2] - stop1.color[2])
+            ];
+        }
+
+        function updateColormapLegend(minZ, maxZ, stops) {
+            const legendRow = document.getElementById('colormap-legend-row');
+            const legendBar = document.getElementById('colormap-legend-bar');
+            const minLabel = document.getElementById('legend-min-val');
+            const maxLabel = document.getElementById('legend-max-val');
+
+            if (!legendRow || !legendBar) return;
+
+            minLabel.textContent = `${minZ.toFixed(2)} m`;
+            maxLabel.textContent = `${maxZ.toFixed(2)} m`;
+
+            const gradientParts = stops.map(stop => {
+                const r = Math.round(stop.color[0] * 255);
+                const g = Math.round(stop.color[1] * 255);
+                const b = Math.round(stop.color[2] * 255);
+                return `rgb(${r},${g},${b}) ${stop.t * 100}%`;
+            });
+            legendBar.style.background = `linear-gradient(to right, ${gradientParts.join(', ')})`;
+        }
+
         function applyElevationColoring(object) {
             if (!object) return;
+            const mode = colorModeSelect.value;
+            const stops = COLORMAPS[mode] || COLORMAPS.spectral;
+
             const boundingBox = new THREE.Box3().setFromObject(object);
             const minZ = boundingBox.min.z;
             const maxZ = boundingBox.max.z;
             const deltaZ = (maxZ - minZ) || 1.0;
+
+            updateColormapLegend(minZ, maxZ, stops);
 
             object.traverse((child) => {
                 if (child.geometry && child.geometry.attributes.position) {
@@ -1618,23 +2282,7 @@
                     for (let i = 0; i < count; i++) {
                         const z = posAttr.getZ(i);
                         const t = Math.min(Math.max((z - minZ) / deltaZ, 0), 1);
-
-                        // Rampa de cores Spectral (Azul -> Verde -> Vermelho)
-                        let r = 0, g = 0, b = 0;
-                        if (t < 0.25) {
-                            const ratio = t / 0.25;
-                            b = 1.0; g = ratio;
-                        } else if (t < 0.5) {
-                            const ratio = (t - 0.25) / 0.25;
-                            g = 1.0; b = 1.0 - ratio;
-                        } else if (t < 0.75) {
-                            const ratio = (t - 0.5) / 0.25;
-                            g = 1.0; r = ratio;
-                        } else {
-                            const ratio = (t - 0.75) / 0.25;
-                            r = 1.0; g = 1.0 - ratio;
-                        }
-
+                        const [r, g, b] = interpolateColor(t, stops);
                         colors[i * 3] = r;
                         colors[i * 3 + 1] = g;
                         colors[i * 3 + 2] = b;
@@ -1669,7 +2317,10 @@
             const pointSize = parseFloat(pointSizeInput.value);
             pointSizeVal.textContent = pointSize.toFixed(4);
 
-            if (mode === 'elevation') {
+            const isColormap = ['spectral', 'viridis', 'plasma', 'magma', 'turbo', 'temperature'].includes(mode);
+            document.getElementById('colormap-legend-row').style.display = isColormap ? 'flex' : 'none';
+
+            if (isColormap) {
                 applyElevationColoring(pointCloud);
             } else if (mode === 'original') {
                 restoreOriginalColors(pointCloud);
@@ -1689,7 +2340,7 @@
                                 material.vertexColors = true;
                                 material.color.setHex(0xffffff);
                             }
-                        } else if (mode === 'elevation') {
+                        } else if (isColormap) {
                             material.vertexColors = true;
                             material.color.setHex(0xffffff);
                         } else {
@@ -1700,6 +2351,9 @@
                     });
                 }
             });
+            if (window.updateClipping) {
+                window.updateClipping();
+            }
             render();
         }
 
@@ -1714,10 +2368,6 @@
             }, 100);
         }
 
-        function render() {
-            renderer.render(scene, camera);
-        }
-
         function startAnimation() {
             if (animId === null) {
                 animId = requestAnimationFrame(animate);
@@ -1725,17 +2375,127 @@
         }
 
         function animate() {
-            const needsUpdate = controls.update();
+            let animNeedsUpdate = false;
+
+            // Transição suave da câmera (ViewCube)
+            if (cameraTargetPos) {
+                const now = performance.now();
+                const elapsed = now - cameraAnimStartTime;
+                const t = Math.min(elapsed / cameraAnimDuration, 1);
+                
+                // Easing cubic easeInOut
+                const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+                
+                camera.position.lerpVectors(cameraStartPos, cameraTargetPos, ease);
+                if (cameraTargetUp) {
+                    camera.up.lerpVectors(cameraStartUp, cameraTargetUp, ease);
+                }
+                
+                controls.update();
+                animNeedsUpdate = true;
+                
+                if (t >= 1) {
+                    cameraTargetPos = null;
+                    cameraTargetUp = null;
+                }
+            }
+
+            const controlsNeedsUpdate = controls.update();
             render();
             updateRulerLabel();
-            if (needsUpdate) {
+            
+            if (controlsNeedsUpdate || animNeedsUpdate || controls.autoRotate) {
                 animId = requestAnimationFrame(animate);
             } else {
                 animId = null;
             }
         }
 
+        function render() {
+            renderer.render(scene, camera);
+            updateViewCube();
+        }
+
+        function updateViewCube() {
+            const viewCube = document.getElementById('viewcube');
+            if (!viewCube) return;
+            
+            const matrix = new THREE.Matrix4();
+            matrix.extractRotation(camera.matrixWorldInverse);
+            
+            const e = matrix.elements;
+            
+            // Transpõe a rotação da câmera 3D para o CSS matrix3d
+            const cssMatrix = [
+                e[0], -e[1], e[2], 0,
+                -e[4], e[5], -e[6], 0,
+                e[8], -e[9], e[10], 0,
+                0, 0, 0, 1
+            ];
+            
+            viewCube.style.transform = `matrix3d(${cssMatrix.join(',')})`;
+        }
+
+        function alignCameraPosition(face, dist) {
+            cameraStartPos.copy(camera.position);
+            cameraStartUp.copy(camera.up);
+            
+            const targetPos = new THREE.Vector3();
+            const targetUp = new THREE.Vector3(0, 1, 0);
+
+            switch(face) {
+                case 'front':  targetPos.set(0, 0, dist); break;
+                case 'back':   targetPos.set(0, 0, -dist); break;
+                case 'left':   targetPos.set(-dist, 0, 0); break;
+                case 'right':  targetPos.set(dist, 0, 0); break;
+                case 'top':    targetPos.set(0, dist, 0.001); targetUp.set(0, 0, -1); break;
+                case 'bottom': targetPos.set(0, -dist, 0.001); targetUp.set(0, 0, 1); break;
+            }
+
+            cameraTargetPos = targetPos;
+            cameraTargetUp = targetUp;
+            cameraAnimStartTime = performance.now();
+            
+            controls.target.set(0, 0, 0);
+            startAnimation();
+        }
+
+        window.alignCamera = function(face) {
+            if (!pointCloud) {
+                alignCameraPosition(face, defaultCameraZ);
+                return;
+            }
+            
+            const boundingBox = new THREE.Box3().setFromObject(pointCloud);
+            const size = new THREE.Vector3();
+            boundingBox.getSize(size);
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fov = camera.fov * (Math.PI / 180);
+            let dist = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.8;
+            if (isNaN(dist) || dist <= 0) dist = defaultCameraZ;
+
+            alignCameraPosition(face, dist);
+        };
+
         function onPointerDown(e) {
+            // Se seleção de região estiver ativa e for clique com botão esquerdo
+            if (selectionActive && e.button === 0 && pointCloud) {
+                isSelecting = true;
+                selectStartPos = { x: e.clientX, y: e.clientY };
+                controls.enabled = false; // Bloqueia rotação da câmera
+                
+                const selectionBox = document.getElementById('selection-box');
+                selectionBox.style.left = `${e.clientX}px`;
+                selectionBox.style.top = `${e.clientY}px`;
+                selectionBox.style.width = '0px';
+                selectionBox.style.height = '0px';
+                selectionBox.style.display = 'block';
+
+                window.addEventListener('pointermove', onPointerMove);
+                window.addEventListener('pointerup', onPointerUp);
+                return;
+            }
+
             if (!rulerActive || !pointCloud) return;
 
             // Converter a coordenada do mouse para normalizado (-1 a +1)
@@ -1779,6 +2539,133 @@
 
                 addRulerPoint(clickedPoint, maxDim);
             }
+        }
+
+        function onPointerMove(e) {
+            if (!isSelecting) return;
+            const selectionBox = document.getElementById('selection-box');
+            
+            const currentX = e.clientX;
+            const currentY = e.clientY;
+
+            const minX = Math.min(selectStartPos.x, currentX);
+            const maxX = Math.max(selectStartPos.x, currentX);
+            const minY = Math.min(selectStartPos.y, currentY);
+            const maxY = Math.max(selectStartPos.y, currentY);
+
+            selectionBox.style.left = `${minX}px`;
+            selectionBox.style.top = `${minY}px`;
+            selectionBox.style.width = `${maxX - minX}px`;
+            selectionBox.style.height = `${maxY - minY}px`;
+        }
+
+        function onPointerUp(e) {
+            if (!isSelecting) return;
+            isSelecting = false;
+            
+            const selectionBox = document.getElementById('selection-box');
+            selectionBox.style.display = 'none';
+            controls.enabled = true; // Reativa controles da câmera
+
+            window.removeEventListener('pointermove', onPointerMove);
+            window.removeEventListener('pointerup', onPointerUp);
+
+            const endX = e.clientX;
+            const endY = e.clientY;
+
+            // Evita seleções acidentais em cliques muito pequenos
+            if (Math.abs(endX - selectStartPos.x) < 5 && Math.abs(endY - selectStartPos.y) < 5) {
+                return;
+            }
+
+            // Converter pixels para coordenadas NDC (-1 a 1)
+            const rect = renderer.domElement.getBoundingClientRect();
+            const startNDC = {
+                x: ((selectStartPos.x - rect.left) / rect.width) * 2 - 1,
+                y: -((selectStartPos.y - rect.top) / rect.height) * 2 + 1
+            };
+            const endNDC = {
+                x: ((endX - rect.left) / rect.width) * 2 - 1,
+                y: -((endY - rect.top) / rect.height) * 2 + 1
+            };
+
+            selectRegion(startNDC, endNDC);
+        }
+
+        function selectRegion(start, end) {
+            if (!pointCloud) return;
+
+            const minX = Math.min(start.x, end.x);
+            const maxX = Math.max(start.x, end.x);
+            const minY = Math.min(start.y, end.y);
+            const maxY = Math.max(start.y, end.y);
+
+            // Matriz MVP da câmera
+            const projMatrix = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+            const vec = new THREE.Vector3();
+
+            let selectedCount = 0;
+
+            pointCloud.traverse((child) => {
+                if (child.geometry && child.geometry.attributes.position) {
+                    const geom = child.geometry;
+                    const posAttr = geom.attributes.position;
+                    const count = posAttr.count;
+                    
+                    // Salvar cores originais se ainda não salvo
+                    if (!geom.userData.originalColors && geom.attributes.color) {
+                        geom.userData.originalColors = geom.attributes.color.clone();
+                        geom.userData.hasOriginalColors = true;
+                    }
+
+                    // Se não tiver cores originais, cria cores brancas default
+                    if (!geom.attributes.color) {
+                        const colors = new Float32Array(count * 3).fill(1.0);
+                        geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                        geom.userData.originalColors = geom.attributes.color.clone();
+                        geom.userData.hasOriginalColors = true;
+                    }
+
+                    const origColors = geom.userData.originalColors.array;
+                    const colorsAttr = geom.attributes.color;
+                    const colors = colorsAttr.array;
+                    
+                    const matrixWorld = child.matrixWorld;
+
+                    for (let i = 0; i < count; i++) {
+                        // Posicionar ponto no espaço global e projetar na tela
+                        vec.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
+                        vec.applyMatrix4(matrixWorld);
+                        vec.applyMatrix4(projMatrix);
+
+                        // Se estiver dentro das coordenadas 2D e do frustum da câmera (Z entre -1 e 1)
+                        if (vec.x >= minX && vec.x <= maxX && vec.y >= minY && vec.y <= maxY && vec.z >= -1 && vec.z <= 1) {
+                            colors[i * 3] = origColors[i * 3];
+                            colors[i * 3 + 1] = origColors[i * 3 + 1];
+                            colors[i * 3 + 2] = origColors[i * 3 + 2];
+                            selectedCount++;
+                        } else {
+                            // Escurece os pontos não selecionados com base na luminância
+                            const r = origColors[i * 3];
+                            const g = origColors[i * 3 + 1];
+                            const b = origColors[i * 3 + 2];
+                            const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+                            colors[i * 3] = luma * 0.15;
+                            colors[i * 3 + 1] = luma * 0.15;
+                            colors[i * 3 + 2] = luma * 0.15;
+                        }
+                    }
+                    colorsAttr.needsUpdate = true;
+                    
+                    if (child.material) {
+                        child.material.vertexColors = true;
+                        child.material.needsUpdate = true;
+                    }
+                }
+            });
+
+            document.getElementById('selection-count-val').textContent = `${selectedCount.toLocaleString()} pontos`;
+            render();
         }
 
         function addRulerPoint(point, maxDim) {
